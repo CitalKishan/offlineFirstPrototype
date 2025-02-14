@@ -15,11 +15,12 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system";
 import { createClient } from "@supabase/supabase-js";
 import NetInfo from "@react-native-community/netinfo";
+import { configData } from "../config";
 
 // Initialize Supabase client
 const supabase = createClient(
-  "https://qaxynrlmloqlqypcmcai.supabase.co",
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFheHlucmxtbG9xbHF5cGNtY2FpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzkzNTczODksImV4cCI6MjA1NDkzMzM4OX0.biLc3PWK3fw2OjLKHN5fVDoc8SKQKUb-GSYYe0l-J7w"
+  configData.supabase.url,
+  configData.supabase.anonKey
 );
 
 const theme = {
