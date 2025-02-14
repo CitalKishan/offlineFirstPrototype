@@ -12,6 +12,13 @@ import {
 import * as ImagePicker from "expo-image-picker";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system";
+import { createClient } from "@supabase/supabase-js";
+
+// Initialize Supabase client
+const supabase = createClient(
+  "https://qaxynrlmloqlqypcmcai.supabase.co",
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFheHlucmxtbG9xbHF5cGNtY2FpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzkzNTczODksImV4cCI6MjA1NDkzMzM4OX0.biLc3PWK3fw2OjLKHN5fVDoc8SKQKUb-GSYYe0l-J7w"
+);
 
 const theme = {
   dark: {
@@ -53,15 +60,50 @@ export default function App() {
     });
 
     if (!result.canceled) {
-      const localUri = result.assets[0].uri;
-      const newPath = FileSystem.documentDirectory + `${Date.now()}.jpg`;
-      await FileSystem.copyAsync({ from: localUri, to: newPath });
+      try {
+        const localUri = result.assets[0].uri;
 
-      const newImage = { uri: newPath };
-      const updatedImages = [newImage, ...savedImages];
-      setSavedImages(updatedImages);
-      await AsyncStorage.setItem("savedImages", JSON.stringify(updatedImages));
-      Alert.alert("Success", "Image added to local storage.");
+        // First save locally
+        const fileName = `${Date.now()}.jpg`;
+        const newPath = FileSystem.documentDirectory + fileName;
+        await FileSystem.copyAsync({ from: localUri, to: newPath });
+
+        // Then read the saved file as base64 for Supabase upload
+        const base64File = await FileSystem.readAsStringAsync(newPath, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+
+        // Upload to Supabase Storage
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from("images")
+          .upload(fileName, base64File, {
+            contentType: "image/jpeg",
+          });
+
+        if (uploadError) {
+          throw uploadError;
+        }
+
+        // Get public URL of uploaded image
+        const {
+          data: { publicUrl },
+        } = supabase.storage.from("images").getPublicUrl(fileName);
+
+        const newImage = {
+          uri: newPath,
+          supabaseUrl: publicUrl,
+        };
+        const updatedImages = [newImage, ...savedImages];
+        setSavedImages(updatedImages);
+        await AsyncStorage.setItem(
+          "savedImages",
+          JSON.stringify(updatedImages)
+        );
+        Alert.alert("Success", "Image uploaded successfully!");
+      } catch (error) {
+        console.error("Upload error:", error);
+        Alert.alert("Error", "Failed to upload image. Please try again.");
+      }
     }
   };
 
