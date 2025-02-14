@@ -56,7 +56,6 @@ export default function App() {
   const pickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.5,
     });
 
     if (!result.canceled) {
@@ -108,9 +107,37 @@ export default function App() {
   };
 
   const deleteImage = async (index) => {
-    const updatedImages = savedImages.filter((_, i) => i !== index);
-    setSavedImages(updatedImages);
-    await AsyncStorage.setItem("savedImages", JSON.stringify(updatedImages));
+    try {
+      const imageToDelete = savedImages[index];
+
+      // Delete from Supabase if we have a supabaseUrl
+      if (imageToDelete.supabaseUrl) {
+        // Extract filename from the URL
+        const fileName = imageToDelete.supabaseUrl.split("/").pop();
+        if (fileName) {
+          const { error: deleteError } = await supabase.storage
+            .from("images")
+            .remove([fileName]);
+
+          if (deleteError) {
+            console.error("Error deleting from Supabase:", deleteError);
+            Alert.alert(
+              "Warning",
+              "Failed to delete from cloud storage, but deleted locally."
+            );
+          }
+        }
+      }
+
+      // Delete locally
+      const updatedImages = savedImages.filter((_, i) => i !== index);
+      setSavedImages(updatedImages);
+      await AsyncStorage.setItem("savedImages", JSON.stringify(updatedImages));
+      Alert.alert("Success", "Image deleted successfully!");
+    } catch (error) {
+      console.error("Delete error:", error);
+      Alert.alert("Error", "Failed to delete image. Please try again.");
+    }
   };
 
   return (
