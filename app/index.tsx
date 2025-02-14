@@ -8,11 +8,13 @@ import {
   TouchableOpacity,
   Text,
   Alert,
+  StatusBar,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system";
 import { createClient } from "@supabase/supabase-js";
+import NetInfo from "@react-native-community/netinfo";
 
 // Initialize Supabase client
 const supabase = createClient(
@@ -28,15 +30,32 @@ const theme = {
     text: "#FFFFFF",
     error: "#CF6679",
     overlay: "rgba(0,0,0,0.9)",
+    success: "#4CAF50",
+    warning: "#FF9800",
   },
 };
 
 export default function App() {
   const [savedImages, setSavedImages] = useState([]);
   const [modalVisible, setModalVisible] = useState(false);
+  const [isConnected, setIsConnected] = useState(true);
 
   useEffect(() => {
     loadSavedImages();
+
+    // Subscribe to network state updates
+    const unsubscribe = NetInfo.addEventListener((state) => {
+      setIsConnected(state.isConnected);
+    });
+
+    // Check initial connection
+    NetInfo.fetch().then((state) => {
+      setIsConnected(state.isConnected);
+    });
+
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   const loadSavedImages = async () => {
@@ -143,6 +162,26 @@ export default function App() {
     }
   };
 
+  // Network status indicator component
+  const NetworkIndicator = () => (
+    <View
+      style={{
+        position: "absolute",
+        top: StatusBar.currentHeight || 0,
+        left: 0,
+        right: 0,
+        backgroundColor: isConnected ? theme.dark.success : theme.dark.warning,
+        padding: 5,
+        alignItems: "center",
+        zIndex: 1000,
+      }}
+    >
+      <Text style={{ color: theme.dark.text, fontWeight: "bold" }}>
+        {isConnected ? "Online" : "Offline"}
+      </Text>
+    </View>
+  );
+
   return (
     <View
       style={{
@@ -152,6 +191,7 @@ export default function App() {
         backgroundColor: theme.dark.background,
       }}
     >
+      <NetworkIndicator />
       <Button
         title="Choose Image"
         onPress={pickImage}
