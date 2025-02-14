@@ -61,27 +61,27 @@ export default function App() {
     if (!result.canceled) {
       try {
         const localUri = result.assets[0].uri;
-
-        // First save locally
-        const fileName = `${Date.now()}.jpg`;
+        const fileType = localUri.split(".").pop();
+        const fileName = `${Date.now()}.${fileType}`;
         const newPath = FileSystem.documentDirectory + fileName;
+
+        // Save locally
         await FileSystem.copyAsync({ from: localUri, to: newPath });
 
-        // Then read the saved file as base64 for Supabase upload
-        const base64File = await FileSystem.readAsStringAsync(newPath, {
-          encoding: FileSystem.EncodingType.Base64,
+        // Prepare FormData for Supabase upload
+        const formData = new FormData();
+        formData.append("file", {
+          uri: newPath,
+          name: fileName,
+          type: `image/${fileType}`,
         });
 
         // Upload to Supabase Storage
-        const { data: uploadData, error: uploadError } = await supabase.storage
+        const { data, error } = await supabase.storage
           .from("images")
-          .upload(fileName, base64File, {
-            contentType: "image/jpeg",
-          });
+          .upload(fileName, formData);
 
-        if (uploadError) {
-          throw uploadError;
-        }
+        if (error) throw error;
 
         // Get public URL of uploaded image
         const {
@@ -92,12 +92,15 @@ export default function App() {
           uri: newPath,
           supabaseUrl: publicUrl,
         };
+
+        // Update state and save locally
         const updatedImages = [newImage, ...savedImages];
         setSavedImages(updatedImages);
         await AsyncStorage.setItem(
           "savedImages",
           JSON.stringify(updatedImages)
         );
+
         Alert.alert("Success", "Image uploaded successfully!");
       } catch (error) {
         console.error("Upload error:", error);
