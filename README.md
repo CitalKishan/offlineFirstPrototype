@@ -48,4 +48,55 @@ Join our community of developers creating universal apps.
 
 - [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
 - [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+
 # offlineFirstPrototype
+
+-Testing steps before commiting to git
+
+Internet connected
+Upload image
+check if uploaded
+Delete Image
+check if deleted
+Upload multiple images
+check if all uploaded
+delete one image
+check if deleted
+delete all images
+check if deleted
+
+Internet off
+upload image
+turn internet on
+check image uploaded to cloud
+turn internet off
+delete image
+turn internet on
+check if image is deleted from cloud
+turn internet off
+upload multiple images
+turn internet on
+check for how many images uploaded
+turn internet off
+delete one image
+turn internet on
+check if image is deleted from cloud
+turn internet off
+delete all images
+turn internet on
+check if all images are deleted from cloud
+
+Persistent storage
+upload image
+force stop the app
+reopen the app
+check if upload images are still there
+delete image
+upload multiple images
+force stop the app
+reopen the app
+check if uploaded images are still there
+delete all images
+
+Pick image again at the time of uploading the image
+Pick multiple images again at the time of uploading the image
