@@ -14,7 +14,7 @@ import Constants from "expo-constants";
 import NetInfo from "@react-native-community/netinfo";
 import { createClient } from "@supabase/supabase-js";
 import { configData } from "../config";
-import Toast from "react-native-toast-message";
+import Toast, { BaseToast, ErrorToast } from "react-native-toast-message";
 import { theme, ThemeMode } from "../utils/theme";
 import { Header } from "../components/Header";
 import { ImageGrid } from "../components/ImageGrid";
@@ -40,6 +40,59 @@ interface ImageInfo {
   deletionQueuedAt?: string;
 }
 
+// Add type for toast props
+interface ToastProps {
+  text1Style: object;
+  text2Style: object;
+  contentContainerStyle?: object;
+  style?: object;
+  [key: string]: any;
+}
+
+// Update toast config with proper types
+const toastConfig = {
+  success: (props: ToastProps) => (
+    <BaseToast
+      {...props}
+      style={{ borderLeftColor: "#2ecc71" }}
+      contentContainerStyle={{ paddingHorizontal: 15 }}
+      text1Style={{ fontSize: 15, fontWeight: "bold" }}
+      text2Style={{ fontSize: 13 }}
+    />
+  ),
+  error: (props: ToastProps) => (
+    <ErrorToast
+      {...props}
+      style={{ borderLeftColor: "#e74c3c" }}
+      text1Style={{ fontSize: 15, fontWeight: "bold" }}
+      text2Style={{ fontSize: 13 }}
+    />
+  ),
+  info: (props: ToastProps) => (
+    <BaseToast
+      {...props}
+      style={{ borderLeftColor: "#3498db" }}
+      contentContainerStyle={{ paddingHorizontal: 15 }}
+      text1Style={{ fontSize: 15, fontWeight: "bold" }}
+      text2Style={{ fontSize: 13 }}
+    />
+  ),
+};
+
+// Update the generateImageHash function to handle the new format
+const generateImageHash = (uri: string): string => {
+  const filename = uri.split("/").pop() || "";
+  const baseFilename = filename.split(".")[0];
+
+  // If filename matches our format (timestamp-index)
+  if (/^\d+-\d+$/.test(baseFilename)) {
+    return baseFilename;
+  }
+
+  // For other files (like when first selecting), generate a new timestamp-index
+  return `${Date.now()}-0`;
+};
+
 export default function App() {
   const [savedImages, setSavedImages] = useState<ImageInfo[]>([]);
   const [saveQueue, setSaveQueue] = useState<ImageInfo[]>([]);
@@ -49,6 +102,9 @@ export default function App() {
   const [isConnected, setIsConnected] = useState(true);
   const [themeMode, setThemeMode] = useState<ThemeMode>("dark");
   const currentTheme = theme[themeMode];
+  const [processingImages, setProcessingImages] = useState<Set<string>>(
+    new Set()
+  );
 
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener((state) => {
@@ -78,19 +134,67 @@ export default function App() {
     }
   }, [uploadQueue.length, isConnected]);
 
+  useEffect(() => {
+    loadSavedImages();
+  }, []);
+
   const loadSavedImages = async () => {
     console.log("🔄 Loading saved images...");
-    const saved = await AsyncStorage.getItem("savedImages");
-    if (saved) {
-      try {
+    try {
+      const saved = await AsyncStorage.getItem("savedImages");
+      if (saved) {
         const parsed = JSON.parse(saved);
-        const validImages = parsed.filter((img) => img.uri);
+
+        // Wait for all file existence checks to complete
+        const validImagesPromises = await Promise.all(
+          parsed.map(async (img: ImageInfo) => {
+            if (!img.uri || typeof img.uri !== "string") {
+              return null;
+            }
+
+            try {
+              const fileInfo = await FileSystem.getInfoAsync(img.uri);
+              if (fileInfo.exists) {
+                // Keep the existing status - don't modify already uploaded images
+                return img;
+              }
+              return null;
+            } catch (error) {
+              console.error("Error checking file:", img.uri, error);
+              return null;
+            }
+          })
+        );
+
+        const validImages = validImagesPromises.filter(
+          (img): img is ImageInfo => img !== null
+        );
         console.log(`✅ Loaded ${validImages.length} images successfully`);
+
         setSavedImages(validImages);
-      } catch (error) {
-        console.error("❌ Error loading images:", error);
+
+        // Add only pending images to upload queue
+        const pendingImages = validImages.filter(
+          (img) => img.uploadStatus === "pending"
+        );
+        if (pendingImages.length > 0) {
+          console.log(
+            `📤 Adding ${pendingImages.length} pending images to upload queue`
+          );
+          setUploadQueue((prev) => [...prev, ...pendingImages]);
+        }
+      } else {
+        console.log("No saved images found");
         setSavedImages([]);
       }
+    } catch (error) {
+      console.error("❌ Error loading images:", error);
+      Toast.show({
+        type: "error",
+        text1: "Error Loading Images",
+        text2: "Failed to load saved images",
+      });
+      setSavedImages([]);
     }
   };
 
@@ -138,11 +242,12 @@ export default function App() {
     console.log(`📦 Step 3: Processing save queue - ${saveQueue.length} items`);
 
     try {
+      const baseTimestamp = Date.now(); // Use one timestamp as base
       const processedImages = await Promise.all(
-        saveQueue.map(async (imageInfo) => {
-          const newPath =
-            FileSystem.documentDirectory +
-            `${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`;
+        saveQueue.map(async (imageInfo, index) => {
+          // Generate a consistent ID based on timestamp and index
+          const uniqueId = `${baseTimestamp}-${index}`; // Add index to make it unique
+          const newPath = `${FileSystem.documentDirectory}${uniqueId}.jpg`;
 
           try {
             await FileSystem.copyAsync({
@@ -164,16 +269,22 @@ export default function App() {
       );
 
       const validImages = processedImages.filter(
-        (img): img is ImageInfo => img !== null
+        (img): img is NonNullable<typeof img> => img !== null
       );
 
       if (validImages.length > 0) {
         console.log(
           `⏳ Step 5: Moving ${validImages.length} images to upload queue`
         );
-        setSavedImages((prev) => [...prev, ...validImages]);
+
+        // Update states atomically to prevent race conditions
+        const newSavedImages = [...savedImages, ...validImages];
+        setSavedImages(newSavedImages);
         setUploadQueue((prev) => [...prev, ...validImages]);
-        await AsyncStorage.setItem("savedImages", JSON.stringify(savedImages));
+        await AsyncStorage.setItem(
+          "savedImages",
+          JSON.stringify(newSavedImages)
+        );
       }
 
       setSaveQueue([]);
@@ -201,8 +312,36 @@ export default function App() {
 
     try {
       const fileUri = imageInfo.uri;
-      const fileName = fileUri.split("/").pop() || "";
+      const imageHash = generateImageHash(fileUri);
+      const fileName = `${imageHash}.jpg`;
       const fileType = "image/jpeg";
+
+      // Check if file was already uploaded
+      const { data: existingFiles } = await supabase.storage
+        .from("images")
+        .list();
+
+      const alreadyUploaded = existingFiles?.some((file) => {
+        const existingHash = generateImageHash(file.name);
+        return existingHash === imageHash;
+      });
+
+      if (alreadyUploaded) {
+        console.log("⚠️ File was already uploaded, skipping...");
+        return {
+          ...imageInfo,
+          uploadStatus: "success",
+          uploadDate: new Date().toISOString(),
+          cloudPath: fileName,
+          uploadError: null,
+        };
+      }
+
+      // Check if this image is already being processed
+      if (processingImages.has(imageHash)) {
+        console.log("⚠️ Image is already being processed, skipping...");
+        return imageInfo;
+      }
 
       const formData = new FormData();
       formData.append("file", {
@@ -215,9 +354,23 @@ export default function App() {
         .from("images")
         .upload(fileName, formData, {
           contentType: "multipart/form-data",
+          upsert: false, // Prevent overwriting existing files
         });
 
-      if (error) throw error;
+      if (error) {
+        if (error.statusCode === "409") {
+          // File already exists, treat as success
+          console.log("⚠️ File already exists in storage, treating as success");
+          return {
+            ...imageInfo,
+            uploadStatus: "success",
+            uploadDate: new Date().toISOString(),
+            cloudPath: fileName,
+            uploadError: null,
+          };
+        }
+        throw error;
+      }
 
       console.log(`✅ Step 7: Successfully uploaded to cloud: ${data?.path}`);
       return {
@@ -229,10 +382,17 @@ export default function App() {
       };
     } catch (error) {
       console.error("❌ Cloud upload failed:", error);
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : typeof error === "object" && error !== null && "message" in error
+          ? (error as { message: string }).message
+          : "Upload failed";
+
       return {
         ...imageInfo,
         uploadStatus: "error",
-        uploadError: error instanceof Error ? error.message : "Upload failed",
+        uploadError: errorMessage,
       };
     }
   };
@@ -243,48 +403,92 @@ export default function App() {
     console.log(`🔄 Processing upload queue: ${uploadQueue.length} items`);
 
     try {
-      const results = await Promise.all(
-        uploadQueue.map((image) => uploadImageToCloud(image))
-      );
+      const currentQueue = [...uploadQueue];
+      setUploadQueue([]); // Clear the queue immediately
 
-      const successCount = results.filter(
-        (img) => img.uploadStatus === "success"
-      ).length;
+      // Process images one at a time
+      for (const image of currentQueue) {
+        const imageHash = generateImageHash(image.uri);
 
-      console.log(`📊 Upload Summary:
-      Total: ${results.length}
-      Success: ${successCount}
-      Failed: ${results.length - successCount}
-      `);
+        // Skip if image is already being processed
+        if (processingImages.has(imageHash)) {
+          console.log(`⏭️ Skipping duplicate upload for: ${image.uri}`);
+          continue;
+        }
 
-      // Update saved images with upload results
-      setSavedImages((prev) =>
-        prev.map((img) => {
-          const uploadedImage = results.find(
-            (result) => result.uri === img.uri
-          );
-          return uploadedImage || img;
-        })
-      );
+        try {
+          // Mark image as being processed using the hash
+          setProcessingImages((prev) => new Set(prev).add(imageHash));
 
-      setUploadQueue([]);
-      await AsyncStorage.setItem("savedImages", JSON.stringify(savedImages));
+          const result = await uploadImageToCloud(image);
 
-      Toast.show({
-        type: successCount === results.length ? "success" : "warning",
-        text1: "Upload Complete",
-        text2: `Successfully uploaded ${successCount} of ${results.length} images`,
-      });
+          // Update saved images with the result
+          setSavedImages((prev) => {
+            const newSavedImages = prev.map((img) =>
+              img.uri === image.uri ? result : img
+            );
+            // Save to AsyncStorage immediately after each successful upload
+            if (result.uploadStatus === "success") {
+              AsyncStorage.setItem(
+                "savedImages",
+                JSON.stringify(newSavedImages)
+              ).catch((err) =>
+                console.error("Failed to save upload status:", err)
+              );
+            }
+            return newSavedImages;
+          });
+
+          // Remove from processing set
+          setProcessingImages((prev) => {
+            const newSet = new Set(prev);
+            newSet.delete(imageHash);
+            return newSet;
+          });
+
+          // Only show toast if this was a new upload
+          if (
+            image.uploadStatus === "pending" &&
+            result.uploadStatus === "success"
+          ) {
+            Toast.show({
+              type: "success",
+              text1: "Upload Success",
+              text2: "Image uploaded successfully",
+            });
+          } else if (result.uploadStatus === "error") {
+            Toast.show({
+              type: "error",
+              text1: "Upload Failed",
+              text2: result.uploadError || "Unknown error occurred",
+            });
+          }
+        } catch (error) {
+          console.error("Error uploading image:", error);
+          setProcessingImages((prev) => {
+            const newSet = new Set(prev);
+            newSet.delete(imageHash);
+            return newSet;
+          });
+        }
+      }
     } catch (error) {
       console.error(
         "❌ Error processing upload queue:",
         error instanceof Error ? error.message : String(error)
       );
+      Toast.show({
+        type: "error",
+        text1: "Upload Error",
+        text2: "Failed to process upload queue",
+      });
     }
   };
 
-  const deleteImage = async (index) => {
+  const deleteImage = async (index: number) => {
     const imageToDelete = savedImages[index];
+    if (!imageToDelete) return;
+
     console.log("🗑️ Starting delete process for image:", imageToDelete);
 
     if (!isConnected && imageToDelete.uploadStatus === "success") {
@@ -293,7 +497,7 @@ export default function App() {
         if (i === index) {
           return {
             ...img,
-            uploadStatus: "pending_deletion",
+            uploadStatus: "pending_deletion" as const,
             deletionQueuedAt: new Date().toISOString(),
           };
         }
@@ -387,6 +591,8 @@ export default function App() {
     let failureCount = 0;
 
     for (const image of queuedImages) {
+      if (!image.cloudPath) continue;
+
       console.log("🗑️ Processing deletion:", image.cloudPath);
       try {
         const { error } = await supabase.storage
@@ -431,7 +637,9 @@ export default function App() {
     <View
       style={[styles.container, { backgroundColor: currentTheme.background }]}
     >
-      <StatusBar style={themeMode === "dark" ? "light" : "dark"} />
+      <StatusBar
+        barStyle={themeMode === "dark" ? "light-content" : "dark-content"}
+      />
       <ConnectionStatus isConnected={isConnected} />
       <Header
         themeMode={themeMode}
@@ -461,7 +669,7 @@ export default function App() {
         currentTheme={currentTheme}
         onClose={() => setModalVisible(false)}
       />
-      <Toast />
+      <Toast config={toastConfig} />
     </View>
   );
 }
