@@ -51,6 +51,7 @@ export default function App() {
     // When isConnected changes to true, check and upload pending images
     if (isConnected) {
       uploadPendingImages();
+      processQueuedDeletions();
     }
   }, [isConnected]);
 
@@ -215,9 +216,37 @@ export default function App() {
 
   const deleteImage = async (index) => {
     const imageToDelete = savedImages[index];
+    console.log("Starting delete process for image:", imageToDelete); // Breakpoint #1
 
-    // Delete from cloud if it was uploaded successfully
+    // If offline and image is in cloud, queue for deletion
+    if (!isConnected && imageToDelete.uploadStatus === "success") {
+      console.log("Offline detected, queueing image for deletion"); // Breakpoint #2
+      const updatedImages = savedImages.map((img, i) => {
+        if (i === index) {
+          return {
+            ...img,
+            uploadStatus: "pending_deletion",
+            deletionQueuedAt: new Date().toISOString(),
+          };
+        }
+        return img;
+      });
+
+      setSavedImages(updatedImages);
+      await AsyncStorage.setItem("savedImages", JSON.stringify(updatedImages));
+      Alert.alert(
+        "Queued",
+        "Image will be deleted when internet connection is restored"
+      );
+      return;
+    }
+
+    // If online and image is in cloud, delete from cloud first
     if (imageToDelete.uploadStatus === "success" && imageToDelete.cloudPath) {
+      console.log(
+        "Online, attempting to delete from cloud:",
+        imageToDelete.cloudPath
+      ); // Breakpoint #3
       try {
         const { error } = await supabase.storage
           .from("images")
@@ -228,6 +257,7 @@ export default function App() {
           Alert.alert("Error", "Failed to delete from cloud storage");
           return;
         }
+        console.log("Successfully deleted from cloud"); // Breakpoint #4
       } catch (error) {
         console.error("Error deleting from cloud:", error);
         Alert.alert("Error", "Failed to delete from cloud storage");
@@ -236,10 +266,51 @@ export default function App() {
     }
 
     // Delete from local storage
+    console.log("Deleting from local storage"); // Breakpoint #5
     const updatedImages = savedImages.filter((_, i) => i !== index);
     setSavedImages(updatedImages);
     await AsyncStorage.setItem("savedImages", JSON.stringify(updatedImages));
-    Alert.alert("Success", "Image deleted from both local and cloud storage");
+    Alert.alert("Success", "Image deleted successfully");
+  };
+
+  const processQueuedDeletions = async () => {
+    console.log("Checking for queued deletions"); // Breakpoint #6
+
+    const queuedImages = savedImages.filter(
+      (img) => img.uploadStatus === "pending_deletion"
+    );
+    if (queuedImages.length === 0) return;
+
+    console.log(`Found ${queuedImages.length} images queued for deletion`); // Breakpoint #7
+
+    for (const image of queuedImages) {
+      console.log("Processing queued deletion for:", image.cloudPath); // Breakpoint #8
+      try {
+        const { error } = await supabase.storage
+          .from("images")
+          .remove([image.cloudPath]);
+
+        if (!error) {
+          console.log("Successfully deleted queued image from cloud"); // Breakpoint #9
+        }
+      } catch (error) {
+        console.error("Failed to delete queued image:", error);
+      }
+    }
+
+    // Remove all queued images from local storage
+    const remainingImages = savedImages.filter(
+      (img) => img.uploadStatus !== "pending_deletion"
+    );
+    setSavedImages(remainingImages);
+    await AsyncStorage.setItem("savedImages", JSON.stringify(remainingImages));
+
+    if (queuedImages.length > 0) {
+      Alert.alert(
+        "Cleanup Complete",
+        `Processed ${queuedImages.length} queued deletions`
+      );
+    }
   };
 
   const getUploadStatusColor = (status) => {
@@ -250,6 +321,8 @@ export default function App() {
         return theme.dark.error;
       case "uploading":
         return theme.dark.primary;
+      case "pending_deletion":
+        return theme.dark.error;
       default:
         return theme.dark.pending;
     }
@@ -263,6 +336,10 @@ export default function App() {
         return `❌ Error\n${image.uploadError}`;
       case "uploading":
         return "↑ Uploading...";
+      case "pending_deletion":
+        return `🗑️ Queued for deletion\n${new Date(
+          image.deletionQueuedAt
+        ).toLocaleDateString()}`;
       default:
         return "Pending";
     }
