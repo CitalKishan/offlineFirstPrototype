@@ -15,6 +15,57 @@ export const ImageGrid: React.FC<ImageGridProps> = ({
   onImagePress,
   onDeleteImage,
 }) => {
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case "success":
+        return currentTheme.success;
+      case "error":
+        return currentTheme.error;
+      case "uploading":
+        return currentTheme.primary;
+      case "pending_deletion":
+        return currentTheme.error;
+      case "pending":
+        return currentTheme.pending;
+      default:
+        return currentTheme.pending;
+    }
+  };
+
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case "success":
+        return "✓";
+      case "error":
+        return "❌";
+      case "uploading":
+        return "↑";
+      case "pending_deletion":
+        return "🗑️";
+      case "pending":
+        return "⌛";
+      default:
+        return "⌛";
+    }
+  };
+
+  const getStatusText = (image: any) => {
+    switch (image.uploadStatus) {
+      case "success":
+        return `Uploaded\n${new Date(image.uploadDate).toLocaleString()}`;
+      case "error":
+        return `Error\n${image.uploadError || 'Unknown error'}`;
+      case "uploading":
+        return "Uploading...";
+      case "pending_deletion":
+        return `Queued for deletion\n${new Date(image.deletionQueuedAt).toLocaleString()}`;
+      case "pending":
+        return "Queued for upload";
+      default:
+        return "Pending";
+    }
+  };
+
   return (
     <View style={styles.grid}>
       {images.map((image, index) => (
@@ -24,21 +75,33 @@ export const ImageGrid: React.FC<ImageGridProps> = ({
           onPress={() => onImagePress(image)}
         >
           <Image source={{ uri: image.uri }} style={styles.image} />
+          
+          {/* Status Overlay */}
+          <View style={[
+            styles.statusOverlay,
+            { backgroundColor: `${currentTheme.surface}CC` }
+          ]}>
+            <View style={[
+              styles.statusIconContainer,
+              { backgroundColor: getStatusColor(image.uploadStatus) }
+            ]}>
+              <Text style={styles.statusIcon}>
+                {getStatusIcon(image.uploadStatus)}
+              </Text>
+            </View>
+            <Text style={[styles.statusText, { color: currentTheme.text }]}>
+              {getStatusText(image)}
+            </Text>
+          </View>
+
+          {/* Loading Indicator */}
           {image.uploadStatus === "uploading" && (
-            <View style={[styles.overlay, { backgroundColor: currentTheme.overlay }]}>
-              <ActivityIndicator color={currentTheme.primary} />
+            <View style={[styles.loadingOverlay, { backgroundColor: `${currentTheme.surface}99` }]}>
+              <ActivityIndicator size="large" color={currentTheme.primary} />
             </View>
           )}
-          {image.uploadStatus === "error" && (
-            <View style={[styles.errorBadge, { backgroundColor: currentTheme.error }]}>
-              <Text style={styles.errorText}>!</Text>
-            </View>
-          )}
-          {image.uploadStatus === "pending" && (
-            <View style={[styles.pendingBadge, { backgroundColor: currentTheme.pending }]}>
-              <Text style={styles.pendingText}>⌛</Text>
-            </View>
-          )}
+
+          {/* Delete Button */}
           <TouchableOpacity
             style={[styles.deleteButton, { backgroundColor: currentTheme.error }]}
             onPress={() => onDeleteImage(index)}
@@ -68,38 +131,37 @@ const styles = StyleSheet.create({
     height: '100%',
     borderRadius: 8,
   },
-  overlay: {
+  statusOverlay: {
+    position: 'absolute',
+    bottom: 4,
+    left: 4,
+    right: 4,
+    padding: 4,
+    borderBottomLeftRadius: 8,
+    borderBottomRightRadius: 8,
+  },
+  statusIconContainer: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  statusIcon: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  statusText: {
+    fontSize: 10,
+    textAlign: 'center',
+  },
+  loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
     alignItems: 'center',
     borderRadius: 8,
-  },
-  errorBadge: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  errorText: {
-    color: 'white',
-    fontWeight: 'bold',
-  },
-  pendingBadge: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  pendingText: {
-    color: 'white',
   },
   deleteButton: {
     position: 'absolute',
