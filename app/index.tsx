@@ -181,9 +181,11 @@ export default function App() {
     console.log("📸 Opening image picker...");
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.5,
+      quality: 1,
       allowsMultipleSelection: true,
-      // selectionLimit: 10,
+      selectionLimit: 10,
+      exif: true,
+      base64: false,
     });
 
     if (!result.canceled) {
