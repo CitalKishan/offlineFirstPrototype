@@ -8,16 +8,14 @@ import {
   TouchableOpacity,
   Text,
   Alert,
-  StatusBar,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system";
-import { createClient } from "@supabase/supabase-js";
 import NetInfo from "@react-native-community/netinfo";
+import { createClient } from "@supabase/supabase-js";
 import { configData } from "../config";
 
-// Initialize Supabase client
 const supabase = createClient(
   configData.supabase.url,
   configData.supabase.anonKey
@@ -32,7 +30,7 @@ const theme = {
     error: "#CF6679",
     overlay: "rgba(0,0,0,0.9)",
     success: "#4CAF50",
-    warning: "#FF9800",
+    pending: "#FFA726",
   },
 };
 
@@ -43,21 +41,18 @@ export default function App() {
 
   useEffect(() => {
     loadSavedImages();
-
-    // Subscribe to network state updates
     const unsubscribe = NetInfo.addEventListener((state) => {
       setIsConnected(state.isConnected);
     });
-
-    // Check initial connection
-    NetInfo.fetch().then((state) => {
-      setIsConnected(state.isConnected);
-    });
-
-    return () => {
-      unsubscribe();
-    };
+    return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    // When isConnected changes to true, check and upload pending images
+    if (isConnected) {
+      uploadPendingImages();
+    }
+  }, [isConnected]);
 
   const loadSavedImages = async () => {
     const saved = await AsyncStorage.getItem("savedImages");
@@ -73,137 +68,233 @@ export default function App() {
     }
   };
 
+  const uploadImageToCloud = async (imageInfo) => {
+    if (!isConnected) {
+      return {
+        ...imageInfo,
+        uploadStatus: "pending",
+        uploadError: "No internet connection",
+      };
+    }
+
+    try {
+      const fileUri = imageInfo.uri;
+      const fileName = fileUri.split("/").pop();
+      const fileExt = fileName.split(".").pop();
+      const fileType = `image/${fileExt}`;
+
+      const formData = new FormData();
+      formData.append("file", {
+        uri: fileUri,
+        name: fileName,
+        type: fileType,
+      });
+
+      const { data, error } = await supabase.storage
+        .from("images")
+        .upload(fileName, formData, {
+          contentType: "multipart/form-data",
+        });
+
+      if (error) {
+        console.error("Upload Error:", error);
+        return {
+          ...imageInfo,
+          uploadStatus: "error",
+          uploadError: error.message,
+        };
+      }
+
+      console.log("Uploaded:", data.path);
+      return {
+        ...imageInfo,
+        uploadStatus: "success",
+        uploadDate: new Date().toISOString(),
+        cloudPath: data.path,
+      };
+    } catch (error) {
+      console.error("Error uploading:", error);
+      return {
+        ...imageInfo,
+        uploadStatus: "error",
+        uploadError: error.message,
+      };
+    }
+  };
+
+  const uploadPendingImages = async () => {
+    // Get pending images
+    const pendingImages = savedImages.filter(
+      (img) => img.uploadStatus === "pending" || img.uploadStatus === "error"
+    );
+
+    if (pendingImages.length === 0) return;
+
+    console.log(
+      "Internet connection restored. Starting upload of pending images..."
+    );
+    Alert.alert(
+      "Uploading",
+      `Starting upload of ${pendingImages.length} pending images...`
+    );
+
+    // Upload each pending image
+    const updatedImages = [...savedImages];
+    for (const pendingImage of pendingImages) {
+      const index = updatedImages.findIndex(
+        (img) => img.uri === pendingImage.uri
+      );
+      if (index === -1) continue;
+
+      console.log(`Uploading image ${index + 1} of ${pendingImages.length}`);
+
+      // Update status to uploading
+      updatedImages[index] = { ...pendingImage, uploadStatus: "uploading" };
+      setSavedImages(updatedImages);
+      await AsyncStorage.setItem("savedImages", JSON.stringify(updatedImages));
+
+      // Attempt to upload
+      const uploadedImage = await uploadImageToCloud(pendingImage);
+      updatedImages[index] = uploadedImage;
+      setSavedImages(updatedImages);
+      await AsyncStorage.setItem("savedImages", JSON.stringify(updatedImages));
+    }
+
+    const successCount = updatedImages.filter(
+      (img) => img.uploadStatus === "success"
+    ).length;
+    console.log(
+      `Upload complete. ${successCount}/${pendingImages.length} images uploaded successfully`
+    );
+    Alert.alert(
+      "Upload Complete",
+      `Successfully uploaded ${successCount} out of ${pendingImages.length} images.`
+    );
+  };
+
   const pickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.5,
     });
 
     if (!result.canceled) {
-      try {
-        const localUri = result.assets[0].uri;
-        const fileType = localUri.split(".").pop();
-        const fileName = `${Date.now()}.${fileType}`;
-        const newPath = FileSystem.documentDirectory + fileName;
+      const localUri = result.assets[0].uri;
+      const newPath = FileSystem.documentDirectory + `${Date.now()}.jpg`;
+      await FileSystem.copyAsync({ from: localUri, to: newPath });
 
-        // Save locally
-        await FileSystem.copyAsync({ from: localUri, to: newPath });
+      const newImage = {
+        uri: newPath,
+        uploadStatus: "uploading",
+        uploadError: null,
+        uploadDate: null,
+      };
 
-        // Prepare FormData for Supabase upload
-        const formData = new FormData();
-        formData.append("file", {
-          uri: newPath,
-          name: fileName,
-          type: `image/${fileType}`,
-        });
+      // Add image to state immediately with "uploading" status
+      const updatedImages = [newImage, ...savedImages];
+      setSavedImages(updatedImages);
+      await AsyncStorage.setItem("savedImages", JSON.stringify(updatedImages));
 
-        // Upload to Supabase Storage
-        const { data, error } = await supabase.storage
-          .from("images")
-          .upload(fileName, formData);
+      // Start upload process
+      const uploadedImage = await uploadImageToCloud(newImage);
 
-        if (error) throw error;
+      // Update state with upload result
+      const finalImages = [uploadedImage, ...savedImages];
+      setSavedImages(finalImages);
+      await AsyncStorage.setItem("savedImages", JSON.stringify(finalImages));
 
-        // Get public URL of uploaded image
-        const {
-          data: { publicUrl },
-        } = supabase.storage.from("images").getPublicUrl(fileName);
-
-        const newImage = {
-          uri: newPath,
-          supabaseUrl: publicUrl,
-        };
-
-        // Update state and save locally
-        const updatedImages = [newImage, ...savedImages];
-        setSavedImages(updatedImages);
-        await AsyncStorage.setItem(
-          "savedImages",
-          JSON.stringify(updatedImages)
-        );
-
-        Alert.alert("Success", "Image uploaded successfully!");
-      } catch (error) {
-        console.error("Upload error:", error);
-        Alert.alert("Error", "Failed to upload image. Please try again.");
-      }
+      Alert.alert(
+        uploadedImage.uploadStatus === "success" ? "Success" : "Note",
+        uploadedImage.uploadStatus === "success"
+          ? "Image added and uploaded to cloud"
+          : "Image saved locally. " +
+              (uploadedImage.uploadError || "Will upload when online.")
+      );
     }
   };
 
   const deleteImage = async (index) => {
-    try {
-      const imageToDelete = savedImages[index];
+    const imageToDelete = savedImages[index];
 
-      // Delete from Supabase if we have a supabaseUrl
-      if (imageToDelete.supabaseUrl) {
-        // Extract filename from the URL
-        const fileName = imageToDelete.supabaseUrl.split("/").pop();
-        if (fileName) {
-          const { error: deleteError } = await supabase.storage
-            .from("images")
-            .remove([fileName]);
+    // Delete from cloud if it was uploaded successfully
+    if (imageToDelete.uploadStatus === "success" && imageToDelete.cloudPath) {
+      try {
+        const { error } = await supabase.storage
+          .from("images")
+          .remove([imageToDelete.cloudPath]);
 
-          if (deleteError) {
-            console.error("Error deleting from Supabase:", deleteError);
-            Alert.alert(
-              "Warning",
-              "Failed to delete from cloud storage, but deleted locally."
-            );
-          }
+        if (error) {
+          console.error("Error deleting from cloud:", error);
+          Alert.alert("Error", "Failed to delete from cloud storage");
+          return;
         }
+      } catch (error) {
+        console.error("Error deleting from cloud:", error);
+        Alert.alert("Error", "Failed to delete from cloud storage");
+        return;
       }
+    }
 
-      // Delete locally
-      const updatedImages = savedImages.filter((_, i) => i !== index);
-      setSavedImages(updatedImages);
-      await AsyncStorage.setItem("savedImages", JSON.stringify(updatedImages));
-      Alert.alert("Success", "Image deleted successfully!");
-    } catch (error) {
-      console.error("Delete error:", error);
-      Alert.alert("Error", "Failed to delete image. Please try again.");
+    // Delete from local storage
+    const updatedImages = savedImages.filter((_, i) => i !== index);
+    setSavedImages(updatedImages);
+    await AsyncStorage.setItem("savedImages", JSON.stringify(updatedImages));
+    Alert.alert("Success", "Image deleted from both local and cloud storage");
+  };
+
+  const getUploadStatusColor = (status) => {
+    switch (status) {
+      case "success":
+        return theme.dark.success;
+      case "error":
+        return theme.dark.error;
+      case "uploading":
+        return theme.dark.primary;
+      default:
+        return theme.dark.pending;
     }
   };
 
-  // Network status indicator component
-  const NetworkIndicator = () => (
-    <View
-      style={{
-        position: "absolute",
-        top: StatusBar.currentHeight || 0,
-        left: 0,
-        right: 0,
-        backgroundColor: isConnected ? theme.dark.success : theme.dark.warning,
-        padding: 5,
-        alignItems: "center",
-        zIndex: 1000,
-      }}
-    >
-      <Text style={{ color: theme.dark.text, fontWeight: "bold" }}>
-        {isConnected ? "Online" : "Offline"}
-      </Text>
-    </View>
-  );
+  const getUploadStatusText = (image) => {
+    switch (image.uploadStatus) {
+      case "success":
+        return `✓ Uploaded\n${new Date(image.uploadDate).toLocaleDateString()}`;
+      case "error":
+        return `❌ Error\n${image.uploadError}`;
+      case "uploading":
+        return "↑ Uploading...";
+      default:
+        return "Pending";
+    }
+  };
 
   return (
-    <View
-      style={{
-        flex: 1,
-        alignItems: "center",
-        justifyContent: "center",
-        backgroundColor: theme.dark.background,
-      }}
-    >
-      <NetworkIndicator />
-      <Button
-        title="Choose Image"
-        onPress={pickImage}
-        color={theme.dark.primary}
-      />
-      <View style={{ marginVertical: 10 }} />
-      <Button
-        title="Show Images"
-        onPress={() => setModalVisible(true)}
-        color={theme.dark.primary}
-      />
+    <View style={{ flex: 1, backgroundColor: theme.dark.background }}>
+      <View
+        style={{
+          backgroundColor: isConnected ? "green" : "red",
+          padding: 10,
+          alignItems: "center",
+        }}
+      >
+        <Text style={{ color: "white", fontWeight: "bold" }}>
+          {isConnected ? "Online" : "Offline"}
+        </Text>
+      </View>
+
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+        <Button
+          title="Choose Image"
+          onPress={pickImage}
+          color={theme.dark.primary}
+        />
+        <View style={{ marginVertical: 10 }} />
+        <Button
+          title="Show Images"
+          onPress={() => setModalVisible(true)}
+          color={theme.dark.primary}
+        />
+      </View>
 
       <Modal
         visible={modalVisible}
@@ -238,12 +329,34 @@ export default function App() {
               >
                 {savedImages.map((img, index) => (
                   <View key={index} style={{ position: "relative", margin: 5 }}>
-                    {img.uri ? (
+                    {img.uri && (
                       <>
                         <Image
                           source={{ uri: img.uri }}
                           style={{ width: 100, height: 100, borderRadius: 5 }}
                         />
+                        <View
+                          style={{
+                            position: "absolute",
+                            bottom: 0,
+                            left: 0,
+                            right: 0,
+                            backgroundColor: getUploadStatusColor(
+                              img.uploadStatus
+                            ),
+                            padding: 4,
+                          }}
+                        >
+                          <Text
+                            style={{
+                              color: theme.dark.text,
+                              fontSize: 10,
+                              textAlign: "center",
+                            }}
+                          >
+                            {getUploadStatusText(img)}
+                          </Text>
+                        </View>
                         <TouchableOpacity
                           style={{
                             position: "absolute",
@@ -269,7 +382,7 @@ export default function App() {
                           </Text>
                         </TouchableOpacity>
                       </>
-                    ) : null}
+                    )}
                   </View>
                 ))}
               </View>
