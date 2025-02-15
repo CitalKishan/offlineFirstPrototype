@@ -26,8 +26,24 @@ const supabase = createClient(
   configData.supabase.anonKey
 );
 
+interface ImageInfo {
+  uri: string;
+  uploadStatus:
+    | "pending"
+    | "uploading"
+    | "success"
+    | "error"
+    | "pending_deletion";
+  uploadError: string | null;
+  uploadDate: string | null;
+  cloudPath?: string;
+  deletionQueuedAt?: string;
+}
+
 export default function App() {
-  const [savedImages, setSavedImages] = useState([]);
+  const [savedImages, setSavedImages] = useState<ImageInfo[]>([]);
+  const [saveQueue, setSaveQueue] = useState<ImageInfo[]>([]);
+  const [uploadQueue, setUploadQueue] = useState<ImageInfo[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedImage, setSelectedImage] = useState(null);
   const [isConnected, setIsConnected] = useState(true);
@@ -35,21 +51,32 @@ export default function App() {
   const currentTheme = theme[themeMode];
 
   useEffect(() => {
-    loadSavedImages();
     const unsubscribe = NetInfo.addEventListener((state) => {
-      const isConnected = state.isConnected && state.isInternetReachable;
-      console.log("Connection status:", isConnected ? "online" : "offline");
+      const isConnected = Boolean(
+        state.isConnected && state.isInternetReachable
+      );
       setIsConnected(isConnected);
+
       if (isConnected) {
-        uploadPendingImages();
+        processUploadQueue();
         processQueuedDeletions();
       }
     });
 
-    return () => {
-      unsubscribe();
-    };
+    return () => unsubscribe();
   }, [isConnected]);
+
+  useEffect(() => {
+    if (saveQueue.length > 0) {
+      processSaveQueue();
+    }
+  }, [saveQueue.length]);
+
+  useEffect(() => {
+    if (isConnected && uploadQueue.length > 0) {
+      processUploadQueue();
+    }
+  }, [uploadQueue.length, isConnected]);
 
   const loadSavedImages = async () => {
     console.log("🔄 Loading saved images...");
@@ -67,8 +94,102 @@ export default function App() {
     }
   };
 
-  const uploadImageToCloud = async (imageInfo) => {
-    console.log("📤 Starting cloud upload for:", imageInfo.uri);
+  const pickImage = async () => {
+    console.log("📸 Opening image picker...");
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 1,
+        allowsMultipleSelection: true,
+        selectionLimit: 10,
+        exif: true,
+        base64: false,
+      });
+
+      if (result.canceled) {
+        console.log("❌ Image selection cancelled");
+        return;
+      }
+
+      console.log(`✨ Step 1: ${result.assets.length} image(s) selected`);
+
+      // Add selected images to save queue
+      const newImages: ImageInfo[] = result.assets.map((asset) => ({
+        uri: asset.uri,
+        uploadStatus: "pending",
+        uploadError: null,
+        uploadDate: null,
+      }));
+
+      console.log("📥 Step 2: Moving images to save queue...");
+      setSaveQueue((prev) => [...prev, ...newImages]);
+    } catch (error) {
+      console.error("❌ Error picking image:", error);
+      Toast.show({
+        type: "error",
+        text1: "Error",
+        text2: "Failed to pick image. Please try again.",
+      });
+    }
+  };
+
+  const processSaveQueue = async () => {
+    if (saveQueue.length === 0) return;
+    console.log(`📦 Step 3: Processing save queue - ${saveQueue.length} items`);
+
+    try {
+      const processedImages = await Promise.all(
+        saveQueue.map(async (imageInfo) => {
+          const newPath =
+            FileSystem.documentDirectory +
+            `${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`;
+
+          try {
+            await FileSystem.copyAsync({
+              from: imageInfo.uri,
+              to: newPath,
+            });
+            console.log(`💾 Step 4: Saved image to local storage: ${newPath}`);
+
+            return {
+              ...imageInfo,
+              uri: newPath,
+              uploadStatus: "pending" as const,
+            };
+          } catch (err) {
+            console.error("Failed to copy image:", err);
+            return null;
+          }
+        })
+      );
+
+      const validImages = processedImages.filter(
+        (img): img is ImageInfo => img !== null
+      );
+
+      if (validImages.length > 0) {
+        console.log(
+          `⏳ Step 5: Moving ${validImages.length} images to upload queue`
+        );
+        setSavedImages((prev) => [...prev, ...validImages]);
+        setUploadQueue((prev) => [...prev, ...validImages]);
+        await AsyncStorage.setItem("savedImages", JSON.stringify(savedImages));
+      }
+
+      setSaveQueue([]);
+    } catch (error) {
+      console.error(
+        "❌ Error processing save queue:",
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  };
+
+  const uploadImageToCloud = async (
+    imageInfo: ImageInfo
+  ): Promise<ImageInfo> => {
+    console.log(`☁️ Step 6: Starting cloud upload for: ${imageInfo.uri}`);
+
     if (!isConnected) {
       console.log("📶 No internet connection, marking as pending");
       return {
@@ -80,179 +201,85 @@ export default function App() {
 
     try {
       const fileUri = imageInfo.uri;
-      const fileName = fileUri.split("/").pop();
-      const fileExt = fileName.split(".").pop();
-      const fileType = `image/${fileExt}`;
-      console.log("📋 Preparing upload:", { fileName, fileType });
+      const fileName = fileUri.split("/").pop() || "";
+      const fileType = "image/jpeg";
 
       const formData = new FormData();
       formData.append("file", {
         uri: fileUri,
         name: fileName,
         type: fileType,
-      });
+      } as any);
 
-      console.log("🚀 Initiating upload to Supabase...");
       const { data, error } = await supabase.storage
         .from("images")
         .upload(fileName, formData, {
           contentType: "multipart/form-data",
         });
 
-      if (error) {
-        console.error("❌ Upload Error:", error);
-        return {
-          ...imageInfo,
-          uploadStatus: "error",
-          uploadError: error.message,
-        };
-      }
+      if (error) throw error;
 
-      console.log("✅ Upload successful:", data.path);
+      console.log(`✅ Step 7: Successfully uploaded to cloud: ${data?.path}`);
       return {
         ...imageInfo,
         uploadStatus: "success",
         uploadDate: new Date().toISOString(),
-        cloudPath: data.path,
+        cloudPath: data?.path || "",
+        uploadError: null,
       };
     } catch (error) {
-      console.error("❌ Upload error:", error);
+      console.error("❌ Cloud upload failed:", error);
       return {
         ...imageInfo,
         uploadStatus: "error",
-        uploadError: error.message,
+        uploadError: error instanceof Error ? error.message : "Upload failed",
       };
     }
   };
 
-  const uploadPendingImages = async () => {
-    console.log("🔄 Checking for pending images...");
-    const pendingImages = savedImages.filter(
-      (img) => img.uploadStatus === "pending" || img.uploadStatus === "error"
-    );
+  const processUploadQueue = async () => {
+    if (!isConnected || uploadQueue.length === 0) return;
 
-    if (pendingImages.length === 0) {
-      console.log("ℹ️ No pending images found");
-      return;
-    }
+    console.log(`🔄 Processing upload queue: ${uploadQueue.length} items`);
 
-    console.log(
-      `📤 Starting upload of ${pendingImages.length} pending images...`
-    );
-    Toast.show({
-      type: "info",
-      text1: "Uploading",
-      text2: `Starting upload of ${pendingImages.length} pending images...`,
-    });
-
-    const updatedImages = [...savedImages];
-    for (const pendingImage of pendingImages) {
-      const index = updatedImages.findIndex(
-        (img) => img.uri === pendingImage.uri
-      );
-      if (index === -1) continue;
-
-      console.log(`📤 Processing image ${index + 1}/${pendingImages.length}`);
-      updatedImages[index] = { ...pendingImage, uploadStatus: "uploading" };
-      setSavedImages(updatedImages);
-      await AsyncStorage.setItem("savedImages", JSON.stringify(updatedImages));
-
-      const uploadedImage = await uploadImageToCloud(pendingImage);
-      updatedImages[index] = uploadedImage;
-      setSavedImages(updatedImages);
-      await AsyncStorage.setItem("savedImages", JSON.stringify(updatedImages));
-    }
-
-    const successCount = updatedImages.filter(
-      (img) => img.uploadStatus === "success"
-    ).length;
-
-    console.log(
-      `✅ Upload complete: ${successCount}/${pendingImages.length} successful`
-    );
-    Toast.show({
-      type: "success",
-      text1: "Upload Complete",
-      text2: `Successfully uploaded ${successCount} out of ${pendingImages.length} images.`,
-    });
-  };
-
-  const pickImage = async () => {
-    console.log("📸 Opening image picker...");
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 1,
-      allowsMultipleSelection: true,
-      selectionLimit: 10,
-      exif: true,
-      base64: false,
-    });
-
-    if (!result.canceled) {
-      console.log(`🖼️ ${result.assets.length} images selected`);
-
-      const newImages = await Promise.all(
-        result.assets.map(async (asset) => {
-          const localUri = asset.uri;
-          const newPath =
-            FileSystem.documentDirectory +
-            `${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`;
-
-          console.log("📁 Copying to local storage:", newPath);
-          await FileSystem.copyAsync({ from: localUri, to: newPath });
-
-          return {
-            uri: newPath,
-            uploadStatus: "uploading",
-            uploadError: null,
-            uploadDate: null,
-          };
-        })
+    try {
+      const results = await Promise.all(
+        uploadQueue.map((image) => uploadImageToCloud(image))
       );
 
-      console.log("💾 Saving to local state...");
-      const updatedImages = [...newImages, ...savedImages];
-      setSavedImages(updatedImages);
-      await AsyncStorage.setItem("savedImages", JSON.stringify(updatedImages));
-
-      // Upload each image
-      console.log("🚀 Starting upload process for multiple images...");
-      const uploadedImages = await Promise.all(
-        newImages.map(async (newImage) => {
-          const uploadedImage = await uploadImageToCloud(newImage);
-          return uploadedImage;
-        })
-      );
-
-      const finalImages = [...uploadedImages, ...savedImages];
-      setSavedImages(finalImages);
-      await AsyncStorage.setItem("savedImages", JSON.stringify(finalImages));
-
-      // Show summary toast
-      const successCount = uploadedImages.filter(
+      const successCount = results.filter(
         (img) => img.uploadStatus === "success"
       ).length;
-      console.log(
-        "✅ Image process complete:",
-        `${successCount}/${uploadedImages.length} uploaded`
+
+      console.log(`📊 Upload Summary:
+      Total: ${results.length}
+      Success: ${successCount}
+      Failed: ${results.length - successCount}
+      `);
+
+      // Update saved images with upload results
+      setSavedImages((prev) =>
+        prev.map((img) => {
+          const uploadedImage = results.find(
+            (result) => result.uri === img.uri
+          );
+          return uploadedImage || img;
+        })
       );
 
+      setUploadQueue([]);
+      await AsyncStorage.setItem("savedImages", JSON.stringify(savedImages));
+
       Toast.show({
-        type: successCount === uploadedImages.length ? "success" : "info",
-        text1:
-          successCount === uploadedImages.length ? "Success" : "Upload Status",
-        text2: `${successCount} of ${uploadedImages.length} images ${
-          successCount === 1 ? "was" : "were"
-        } uploaded successfully${
-          successCount < uploadedImages.length
-            ? `. ${
-                uploadedImages.length - successCount
-              } will upload when online.`
-            : "."
-        }`,
+        type: successCount === results.length ? "success" : "warning",
+        text1: "Upload Complete",
+        text2: `Successfully uploaded ${successCount} of ${results.length} images`,
       });
-    } else {
-      console.log("❌ Image selection cancelled");
+    } catch (error) {
+      console.error(
+        "❌ Error processing upload queue:",
+        error instanceof Error ? error.message : String(error)
+      );
     }
   };
 
