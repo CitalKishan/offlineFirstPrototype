@@ -1,24 +1,25 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
-  Button,
-  Image,
-  Modal,
   ScrollView,
   TouchableOpacity,
   Text,
   StyleSheet,
   StatusBar,
-  ActivityIndicator,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system";
+import Constants from "expo-constants";
 import NetInfo from "@react-native-community/netinfo";
 import { createClient } from "@supabase/supabase-js";
 import { configData } from "../config";
 import Toast from "react-native-toast-message";
 import { theme, ThemeMode } from "../utils/theme";
+import { Header } from "../components/Header";
+import { ImageGrid } from "../components/ImageGrid";
+import { ImageModal } from "../components/ImageModal";
+import { ConnectionStatus } from "../components/ConnectionStatus";
 
 const supabase = createClient(
   configData.supabase.url,
@@ -28,6 +29,7 @@ const supabase = createClient(
 export default function App() {
   const [savedImages, setSavedImages] = useState([]);
   const [modalVisible, setModalVisible] = useState(false);
+  const [selectedImage, setSelectedImage] = useState(null);
   const [isConnected, setIsConnected] = useState(true);
   const [themeMode, setThemeMode] = useState<ThemeMode>("dark");
   const currentTheme = theme[themeMode];
@@ -35,16 +37,18 @@ export default function App() {
   useEffect(() => {
     loadSavedImages();
     const unsubscribe = NetInfo.addEventListener((state) => {
-      setIsConnected(state.isConnected);
+      const isConnected = state.isConnected && state.isInternetReachable;
+      console.log("Connection status:", isConnected ? "online" : "offline");
+      setIsConnected(isConnected);
+      if (isConnected) {
+        uploadPendingImages();
+        processQueuedDeletions();
+      }
     });
-    return () => unsubscribe();
-  }, []);
 
-  useEffect(() => {
-    if (isConnected) {
-      uploadPendingImages();
-      processQueuedDeletions();
-    }
+    return () => {
+      unsubscribe();
+    };
   }, [isConnected]);
 
   const loadSavedImages = async () => {
@@ -362,228 +366,75 @@ export default function App() {
     });
   };
 
-  const getUploadStatusColor = (status) => {
-    switch (status) {
-      case "success":
-        return currentTheme.success;
-      case "error":
-        return currentTheme.error;
-      case "uploading":
-        return currentTheme.primary;
-      case "pending_deletion":
-        return currentTheme.error;
-      default:
-        return currentTheme.pending;
-    }
-  };
-
-  const getUploadStatusText = (image) => {
-    switch (image.uploadStatus) {
-      case "success":
-        return `✓ Uploaded\n${new Date(image.uploadDate).toLocaleDateString()}`;
-      case "error":
-        return `❌ Error\n${image.uploadError}`;
-      case "uploading":
-        return "↑ Uploading...";
-      case "pending_deletion":
-        return `🗑️ Queued for deletion\n${new Date(
-          image.deletionQueuedAt
-        ).toLocaleDateString()}`;
-      default:
-        return "Pending";
-    }
-  };
-
   const toggleTheme = () => {
     setThemeMode((prevMode) => (prevMode === "dark" ? "light" : "dark"));
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: currentTheme.background }}>
+    <View
+      style={[styles.container, { backgroundColor: currentTheme.background }]}
+    >
       <StatusBar style={themeMode === "dark" ? "light" : "dark"} />
-      <View
-        style={{
-          backgroundColor: isConnected ? "green" : "red",
-          padding: 10,
-          alignItems: "center",
-        }}
-      >
-        <Text style={{ color: "white", fontWeight: "bold" }}>
-          {isConnected ? "Online" : "Offline"}
-        </Text>
-      </View>
-
-      <View
-        style={{
-          flexDirection: "row",
-          justifyContent: "space-between",
-          alignItems: "center",
-          padding: 16,
-        }}
-      >
-        <Text
-          style={{
-            fontSize: 24,
-            fontWeight: "bold",
-            color: currentTheme.text,
+      <ConnectionStatus isConnected={isConnected} />
+      <Header
+        themeMode={themeMode}
+        currentTheme={currentTheme}
+        onThemeToggle={toggleTheme}
+      />
+      <ScrollView style={styles.scrollView}>
+        <ImageGrid
+          images={savedImages}
+          currentTheme={currentTheme}
+          onImagePress={(image) => {
+            setSelectedImage(image);
+            setModalVisible(true);
           }}
-        >
-          Offline-First Gallery
-        </Text>
-        <TouchableOpacity
-          style={{
-            padding: 8,
-            borderRadius: 20,
-            width: 40,
-            height: 40,
-            justifyContent: "center",
-            alignItems: "center",
-            backgroundColor: currentTheme.surface,
-          }}
-          onPress={toggleTheme}
-        >
-          <Text
-            style={{
-              fontSize: 18,
-              color: currentTheme.text,
-            }}
-          >
-            {themeMode === "dark" ? "🌙" : "☀️"}
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      <View
-        style={{
-          flex: 1,
-          alignItems: "center",
-          justifyContent: "center",
-        }}
+          onDeleteImage={deleteImage}
+        />
+      </ScrollView>
+      <TouchableOpacity
+        style={[styles.addButton, { backgroundColor: currentTheme.primary }]}
+        onPress={pickImage}
       >
-        <Button
-          title="Choose Image"
-          onPress={pickImage}
-          color={currentTheme.primary}
-        />
-        <View style={{ marginVertical: 10 }} />
-        <Button
-          title="Show Images"
-          onPress={() => setModalVisible(true)}
-          color={currentTheme.primary}
-        />
-      </View>
-
-      <Modal
+        <Text style={styles.addButtonText}>+</Text>
+      </TouchableOpacity>
+      <ImageModal
         visible={modalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setModalVisible(false)}
-      >
-        <View
-          style={{
-            flex: 1,
-            backgroundColor: currentTheme.overlay,
-            justifyContent: "center",
-            alignItems: "center",
-          }}
-        >
-          <View
-            style={{
-              width: "90%",
-              backgroundColor: currentTheme.surface,
-              padding: 20,
-              borderRadius: 10,
-              maxHeight: "80%",
-            }}
-          >
-            <ScrollView>
-              <View
-                style={{
-                  flexDirection: "row",
-                  flexWrap: "wrap",
-                  justifyContent: "center",
-                }}
-              >
-                {savedImages.map((img, index) => (
-                  <View
-                    key={index}
-                    style={{
-                      position: "relative",
-                      margin: 5,
-                      backgroundColor: currentTheme.surface,
-                    }}
-                  >
-                    {img.uri && (
-                      <>
-                        <Image
-                          source={{ uri: img.uri }}
-                          style={{
-                            width: 100,
-                            height: 100,
-                            borderRadius: 5,
-                          }}
-                        />
-                        <View
-                          style={{
-                            position: "absolute",
-                            bottom: 0,
-                            left: 0,
-                            right: 0,
-                            backgroundColor: getUploadStatusColor(
-                              img.uploadStatus
-                            ),
-                            padding: 4,
-                          }}
-                        >
-                          <Text
-                            style={{
-                              color: currentTheme.text,
-                              fontSize: 10,
-                              textAlign: "center",
-                            }}
-                          >
-                            {getUploadStatusText(img)}
-                          </Text>
-                        </View>
-                        <TouchableOpacity
-                          style={{
-                            position: "absolute",
-                            top: 5,
-                            right: 5,
-                            backgroundColor: currentTheme.error,
-                            borderRadius: 12,
-                            width: 24,
-                            height: 24,
-                            justifyContent: "center",
-                            alignItems: "center",
-                          }}
-                          onPress={() => deleteImage(index)}
-                        >
-                          <Text
-                            style={{
-                              color: currentTheme.text,
-                              fontSize: 16,
-                              fontWeight: "bold",
-                            }}
-                          >
-                            ×
-                          </Text>
-                        </TouchableOpacity>
-                      </>
-                    )}
-                  </View>
-                ))}
-              </View>
-            </ScrollView>
-            <Button
-              title="Close"
-              onPress={() => setModalVisible(false)}
-              color={currentTheme.primary}
-            />
-          </View>
-        </View>
-      </Modal>
+        image={selectedImage}
+        currentTheme={currentTheme}
+        onClose={() => setModalVisible(false)}
+      />
       <Toast />
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    paddingTop: Constants.statusBarHeight,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  addButton: {
+    position: "absolute",
+    right: 20,
+    bottom: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    justifyContent: "center",
+    alignItems: "center",
+    elevation: 5,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+  },
+  addButtonText: {
+    color: "white",
+    fontSize: 24,
+    fontWeight: "bold",
+  },
+});
