@@ -216,11 +216,17 @@ export default function App() {
 
   const deleteImage = async (index) => {
     const imageToDelete = savedImages[index];
-    console.log("Starting delete process for image:", imageToDelete); // Breakpoint #1
+    console.log("Starting delete process for image:", imageToDelete);
+    Alert.alert("Starting Deletion", "Beginning the deletion process...");
 
     // If offline and image is in cloud, queue for deletion
     if (!isConnected && imageToDelete.uploadStatus === "success") {
-      console.log("Offline detected, queueing image for deletion"); // Breakpoint #2
+      console.log("Offline detected, queueing image for deletion");
+      Alert.alert(
+        "Offline Mode",
+        "You are currently offline. The image will be queued for deletion."
+      );
+
       const updatedImages = savedImages.map((img, i) => {
         if (i === index) {
           return {
@@ -235,8 +241,8 @@ export default function App() {
       setSavedImages(updatedImages);
       await AsyncStorage.setItem("savedImages", JSON.stringify(updatedImages));
       Alert.alert(
-        "Queued",
-        "Image will be deleted when internet connection is restored"
+        "Queued Successfully",
+        "Image has been queued for deletion and will be removed when internet connection is restored"
       );
       return;
     }
@@ -246,7 +252,12 @@ export default function App() {
       console.log(
         "Online, attempting to delete from cloud:",
         imageToDelete.cloudPath
-      ); // Breakpoint #3
+      );
+      Alert.alert(
+        "Cloud Deletion",
+        "Attempting to delete image from cloud storage..."
+      );
+
       try {
         const { error } = await supabase.storage
           .from("images")
@@ -254,47 +265,85 @@ export default function App() {
 
         if (error) {
           console.error("Error deleting from cloud:", error);
-          Alert.alert("Error", "Failed to delete from cloud storage");
+          Alert.alert(
+            "Cloud Deletion Failed",
+            "Failed to delete from cloud storage. Error: " + error.message
+          );
           return;
         }
-        console.log("Successfully deleted from cloud"); // Breakpoint #4
+        console.log("Successfully deleted from cloud");
+        Alert.alert(
+          "Cloud Deletion Successful",
+          "Successfully removed image from cloud storage"
+        );
       } catch (error) {
         console.error("Error deleting from cloud:", error);
-        Alert.alert("Error", "Failed to delete from cloud storage");
+        Alert.alert(
+          "Cloud Deletion Error",
+          "An unexpected error occurred while deleting from cloud: " +
+            error.message
+        );
         return;
       }
     }
 
     // Delete from local storage
-    console.log("Deleting from local storage"); // Breakpoint #5
+    console.log("Deleting from local storage");
+    Alert.alert("Local Storage", "Removing image from local storage...");
+
     const updatedImages = savedImages.filter((_, i) => i !== index);
     setSavedImages(updatedImages);
     await AsyncStorage.setItem("savedImages", JSON.stringify(updatedImages));
-    Alert.alert("Success", "Image deleted successfully");
+
+    Alert.alert(
+      "Deletion Complete",
+      imageToDelete.uploadStatus === "success"
+        ? "Image has been successfully deleted from both cloud and local storage"
+        : "Image has been successfully deleted from local storage"
+    );
   };
 
   const processQueuedDeletions = async () => {
-    console.log("Checking for queued deletions"); // Breakpoint #6
+    console.log("Checking for queued deletions");
 
     const queuedImages = savedImages.filter(
       (img) => img.uploadStatus === "pending_deletion"
     );
     if (queuedImages.length === 0) return;
 
-    console.log(`Found ${queuedImages.length} images queued for deletion`); // Breakpoint #7
+    console.log(`Found ${queuedImages.length} images queued for deletion`);
+    Alert.alert(
+      "Processing Queue",
+      `Found ${queuedImages.length} images queued for deletion. Starting cleanup...`
+    );
+
+    let successCount = 0;
+    let failureCount = 0;
 
     for (const image of queuedImages) {
-      console.log("Processing queued deletion for:", image.cloudPath); // Breakpoint #8
+      console.log("Processing queued deletion for:", image.cloudPath);
+      Alert.alert(
+        "Processing",
+        `Deleting image ${successCount + failureCount + 1} of ${
+          queuedImages.length
+        }`
+      );
+
       try {
         const { error } = await supabase.storage
           .from("images")
           .remove([image.cloudPath]);
 
         if (!error) {
-          console.log("Successfully deleted queued image from cloud"); // Breakpoint #9
+          console.log("Successfully deleted queued image from cloud");
+          successCount++;
+        } else {
+          console.error("Failed to delete queued image:", error);
+          failureCount++;
         }
       } catch (error) {
         console.error("Failed to delete queued image:", error);
+        failureCount++;
       }
     }
 
@@ -305,12 +354,10 @@ export default function App() {
     setSavedImages(remainingImages);
     await AsyncStorage.setItem("savedImages", JSON.stringify(remainingImages));
 
-    if (queuedImages.length > 0) {
-      Alert.alert(
-        "Cleanup Complete",
-        `Processed ${queuedImages.length} queued deletions`
-      );
-    }
+    Alert.alert(
+      "Queue Processing Complete",
+      `Results:\n- Successfully deleted: ${successCount}\n- Failed to delete: ${failureCount}`
+    );
   };
 
   const getUploadStatusColor = (status) => {
