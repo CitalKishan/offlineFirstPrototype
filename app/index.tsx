@@ -14,6 +14,7 @@ import * as FileSystem from "expo-file-system";
 import NetInfo from "@react-native-community/netinfo";
 import { createClient } from "@supabase/supabase-js";
 import { configData } from "../config";
+import Toast from "react-native-toast-message";
 
 const supabase = createClient(
   configData.supabase.url,
@@ -54,20 +55,25 @@ export default function App() {
   }, [isConnected]);
 
   const loadSavedImages = async () => {
+    console.log("🔄 Loading saved images...");
     const saved = await AsyncStorage.getItem("savedImages");
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
         const validImages = parsed.filter((img) => img.uri);
+        console.log(`✅ Loaded ${validImages.length} images successfully`);
         setSavedImages(validImages);
       } catch (error) {
+        console.error("❌ Error loading images:", error);
         setSavedImages([]);
       }
     }
   };
 
   const uploadImageToCloud = async (imageInfo) => {
+    console.log("📤 Starting cloud upload for:", imageInfo.uri);
     if (!isConnected) {
+      console.log("📶 No internet connection, marking as pending");
       return {
         ...imageInfo,
         uploadStatus: "pending",
@@ -80,6 +86,7 @@ export default function App() {
       const fileName = fileUri.split("/").pop();
       const fileExt = fileName.split(".").pop();
       const fileType = `image/${fileExt}`;
+      console.log("📋 Preparing upload:", { fileName, fileType });
 
       const formData = new FormData();
       formData.append("file", {
@@ -88,6 +95,7 @@ export default function App() {
         type: fileType,
       });
 
+      console.log("🚀 Initiating upload to Supabase...");
       const { data, error } = await supabase.storage
         .from("images")
         .upload(fileName, formData, {
@@ -95,6 +103,7 @@ export default function App() {
         });
 
       if (error) {
+        console.error("❌ Upload Error:", error);
         return {
           ...imageInfo,
           uploadStatus: "error",
@@ -102,6 +111,7 @@ export default function App() {
         };
       }
 
+      console.log("✅ Upload successful:", data.path);
       return {
         ...imageInfo,
         uploadStatus: "success",
@@ -109,6 +119,7 @@ export default function App() {
         cloudPath: data.path,
       };
     } catch (error) {
+      console.error("❌ Upload error:", error);
       return {
         ...imageInfo,
         uploadStatus: "error",
@@ -118,11 +129,24 @@ export default function App() {
   };
 
   const uploadPendingImages = async () => {
+    console.log("🔄 Checking for pending images...");
     const pendingImages = savedImages.filter(
       (img) => img.uploadStatus === "pending" || img.uploadStatus === "error"
     );
 
-    if (pendingImages.length === 0) return;
+    if (pendingImages.length === 0) {
+      console.log("ℹ️ No pending images found");
+      return;
+    }
+
+    console.log(
+      `📤 Starting upload of ${pendingImages.length} pending images...`
+    );
+    Toast.show({
+      type: "info",
+      text1: "Uploading",
+      text2: `Starting upload of ${pendingImages.length} pending images...`,
+    });
 
     const updatedImages = [...savedImages];
     for (const pendingImage of pendingImages) {
@@ -131,6 +155,7 @@ export default function App() {
       );
       if (index === -1) continue;
 
+      console.log(`📤 Processing image ${index + 1}/${pendingImages.length}`);
       updatedImages[index] = { ...pendingImage, uploadStatus: "uploading" };
       setSavedImages(updatedImages);
       await AsyncStorage.setItem("savedImages", JSON.stringify(updatedImages));
@@ -140,17 +165,34 @@ export default function App() {
       setSavedImages(updatedImages);
       await AsyncStorage.setItem("savedImages", JSON.stringify(updatedImages));
     }
+
+    const successCount = updatedImages.filter(
+      (img) => img.uploadStatus === "success"
+    ).length;
+
+    console.log(
+      `✅ Upload complete: ${successCount}/${pendingImages.length} successful`
+    );
+    Toast.show({
+      type: "success",
+      text1: "Upload Complete",
+      text2: `Successfully uploaded ${successCount} out of ${pendingImages.length} images.`,
+    });
   };
 
   const pickImage = async () => {
+    console.log("📸 Opening image picker...");
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 0.5,
     });
 
     if (!result.canceled) {
+      console.log("🖼️ Image selected:", result.assets[0].uri);
       const localUri = result.assets[0].uri;
       const newPath = FileSystem.documentDirectory + `${Date.now()}.jpg`;
+
+      console.log("📁 Copying to local storage:", newPath);
       await FileSystem.copyAsync({ from: localUri, to: newPath });
 
       const newImage = {
@@ -160,21 +202,39 @@ export default function App() {
         uploadDate: null,
       };
 
+      console.log("💾 Saving to local state...");
       const updatedImages = [newImage, ...savedImages];
       setSavedImages(updatedImages);
       await AsyncStorage.setItem("savedImages", JSON.stringify(updatedImages));
 
+      console.log("🚀 Starting upload process...");
       const uploadedImage = await uploadImageToCloud(newImage);
       const finalImages = [uploadedImage, ...savedImages];
       setSavedImages(finalImages);
       await AsyncStorage.setItem("savedImages", JSON.stringify(finalImages));
+
+      console.log("✅ Image process complete:", uploadedImage.uploadStatus);
+      Toast.show({
+        type: uploadedImage.uploadStatus === "success" ? "success" : "info",
+        text1: uploadedImage.uploadStatus === "success" ? "Success" : "Note",
+        text2:
+          uploadedImage.uploadStatus === "success"
+            ? "Image added and uploaded to cloud"
+            : `Image saved locally. ${
+                uploadedImage.uploadError || "Will upload when online."
+              }`,
+      });
+    } else {
+      console.log("❌ Image selection cancelled");
     }
   };
 
   const deleteImage = async (index) => {
     const imageToDelete = savedImages[index];
+    console.log("🗑️ Starting delete process for image:", imageToDelete);
 
     if (!isConnected && imageToDelete.uploadStatus === "success") {
+      console.log("📶 Offline detected, queueing for deletion");
       const updatedImages = savedImages.map((img, i) => {
         if (i === index) {
           return {
@@ -188,49 +248,125 @@ export default function App() {
 
       setSavedImages(updatedImages);
       await AsyncStorage.setItem("savedImages", JSON.stringify(updatedImages));
+
+      console.log("✅ Image queued for deletion");
+      Toast.show({
+        type: "info",
+        text1: "Queued for Deletion",
+        text2: "Image will be deleted when internet connection is restored",
+      });
       return;
     }
 
     if (imageToDelete.uploadStatus === "success" && imageToDelete.cloudPath) {
+      console.log(
+        "☁️ Attempting to delete from cloud:",
+        imageToDelete.cloudPath
+      );
       try {
         const { error } = await supabase.storage
           .from("images")
           .remove([imageToDelete.cloudPath]);
 
         if (error) {
+          console.error("❌ Cloud deletion failed:", error);
+          Toast.show({
+            type: "error",
+            text1: "Cloud Deletion Failed",
+            text2: error.message,
+          });
           return;
         }
+
+        console.log("✅ Successfully deleted from cloud");
+        Toast.show({
+          type: "success",
+          text1: "Cloud Deletion",
+          text2: "Successfully removed from cloud storage",
+        });
       } catch (error) {
+        console.error("❌ Cloud deletion error:", error);
+        Toast.show({
+          type: "error",
+          text1: "Cloud Deletion Error",
+          text2: error.message,
+        });
         return;
       }
     }
 
+    console.log("🗑️ Removing from local storage");
     const updatedImages = savedImages.filter((_, i) => i !== index);
     setSavedImages(updatedImages);
     await AsyncStorage.setItem("savedImages", JSON.stringify(updatedImages));
+
+    console.log("✅ Deletion complete");
+    Toast.show({
+      type: "success",
+      text1: "Deletion Complete",
+      text2:
+        imageToDelete.uploadStatus === "success"
+          ? "Deleted from both cloud and local storage"
+          : "Deleted from local storage",
+    });
   };
 
   const processQueuedDeletions = async () => {
+    console.log("🔄 Checking for queued deletions...");
     const queuedImages = savedImages.filter(
       (img) => img.uploadStatus === "pending_deletion"
     );
-    if (queuedImages.length === 0) return;
+
+    if (queuedImages.length === 0) {
+      console.log("ℹ️ No queued deletions found");
+      return;
+    }
+
+    console.log(`📤 Processing ${queuedImages.length} queued deletions...`);
+    Toast.show({
+      type: "info",
+      text1: "Processing Queue",
+      text2: `Processing ${queuedImages.length} queued deletions...`,
+    });
+
+    let successCount = 0;
+    let failureCount = 0;
 
     for (const image of queuedImages) {
+      console.log("🗑️ Processing deletion:", image.cloudPath);
       try {
         const { error } = await supabase.storage
           .from("images")
           .remove([image.cloudPath]);
+
+        if (!error) {
+          console.log("✅ Successfully deleted from cloud");
+          successCount++;
+        } else {
+          console.error("❌ Failed to delete from cloud:", error);
+          failureCount++;
+        }
       } catch (error) {
-        continue;
+        console.error("❌ Deletion error:", error);
+        failureCount++;
       }
     }
 
+    console.log("🧹 Cleaning up local state...");
     const remainingImages = savedImages.filter(
       (img) => img.uploadStatus !== "pending_deletion"
     );
     setSavedImages(remainingImages);
     await AsyncStorage.setItem("savedImages", JSON.stringify(remainingImages));
+
+    console.log(
+      `✅ Queue processing complete. Success: ${successCount}, Failed: ${failureCount}`
+    );
+    Toast.show({
+      type: "success",
+      text1: "Queue Processing Complete",
+      text2: `Deleted: ${successCount}, Failed: ${failureCount}`,
+    });
   };
 
   const getUploadStatusColor = (status) => {
@@ -392,6 +528,7 @@ export default function App() {
           </View>
         </View>
       </Modal>
+      <Toast />
     </View>
   );
 }
