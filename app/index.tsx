@@ -7,6 +7,9 @@ import {
   ScrollView,
   TouchableOpacity,
   Text,
+  StyleSheet,
+  StatusBar,
+  ActivityIndicator,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -15,29 +18,19 @@ import NetInfo from "@react-native-community/netinfo";
 import { createClient } from "@supabase/supabase-js";
 import { configData } from "../config";
 import Toast from "react-native-toast-message";
+import { theme, ThemeMode } from "../utils/theme";
 
 const supabase = createClient(
   configData.supabase.url,
   configData.supabase.anonKey
 );
 
-const theme = {
-  dark: {
-    background: "#121212",
-    surface: "#1E1E1E",
-    primary: "#BB86FC",
-    text: "#FFFFFF",
-    error: "#CF6679",
-    overlay: "rgba(0,0,0,0.9)",
-    success: "#4CAF50",
-    pending: "#FFA726",
-  },
-};
-
 export default function App() {
   const [savedImages, setSavedImages] = useState([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [isConnected, setIsConnected] = useState(true);
+  const [themeMode, setThemeMode] = useState<ThemeMode>("dark");
+  const currentTheme = theme[themeMode];
 
   useEffect(() => {
     loadSavedImages();
@@ -372,15 +365,15 @@ export default function App() {
   const getUploadStatusColor = (status) => {
     switch (status) {
       case "success":
-        return theme.dark.success;
+        return currentTheme.success;
       case "error":
-        return theme.dark.error;
+        return currentTheme.error;
       case "uploading":
-        return theme.dark.primary;
+        return currentTheme.primary;
       case "pending_deletion":
-        return theme.dark.error;
+        return currentTheme.error;
       default:
-        return theme.dark.pending;
+        return currentTheme.pending;
     }
   };
 
@@ -401,8 +394,13 @@ export default function App() {
     }
   };
 
+  const toggleTheme = () => {
+    setThemeMode((prevMode) => (prevMode === "dark" ? "light" : "dark"));
+  };
+
   return (
-    <View style={{ flex: 1, backgroundColor: theme.dark.background }}>
+    <View style={{ flex: 1, backgroundColor: currentTheme.background }}>
+      <StatusBar style={themeMode === "dark" ? "light" : "dark"} />
       <View
         style={{
           backgroundColor: isConnected ? "green" : "red",
@@ -415,17 +413,63 @@ export default function App() {
         </Text>
       </View>
 
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+      <View
+        style={{
+          flexDirection: "row",
+          justifyContent: "space-between",
+          alignItems: "center",
+          padding: 16,
+        }}
+      >
+        <Text
+          style={{
+            fontSize: 24,
+            fontWeight: "bold",
+            color: currentTheme.text,
+          }}
+        >
+          Offline-First Gallery
+        </Text>
+        <TouchableOpacity
+          style={{
+            padding: 8,
+            borderRadius: 20,
+            width: 40,
+            height: 40,
+            justifyContent: "center",
+            alignItems: "center",
+            backgroundColor: currentTheme.surface,
+          }}
+          onPress={toggleTheme}
+        >
+          <Text
+            style={{
+              fontSize: 18,
+              color: currentTheme.text,
+            }}
+          >
+            {themeMode === "dark" ? "🌙" : "☀️"}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <View
+        style={{
+          flex: 1,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
         <Button
           title="Choose Image"
           onPress={pickImage}
-          color={theme.dark.primary}
+          color={currentTheme.primary}
         />
         <View style={{ marginVertical: 10 }} />
         <Button
           title="Show Images"
           onPress={() => setModalVisible(true)}
-          color={theme.dark.primary}
+          color={currentTheme.primary}
         />
       </View>
 
@@ -438,7 +482,7 @@ export default function App() {
         <View
           style={{
             flex: 1,
-            backgroundColor: theme.dark.overlay,
+            backgroundColor: currentTheme.overlay,
             justifyContent: "center",
             alignItems: "center",
           }}
@@ -446,7 +490,7 @@ export default function App() {
           <View
             style={{
               width: "90%",
-              backgroundColor: theme.dark.surface,
+              backgroundColor: currentTheme.surface,
               padding: 20,
               borderRadius: 10,
               maxHeight: "80%",
@@ -461,12 +505,23 @@ export default function App() {
                 }}
               >
                 {savedImages.map((img, index) => (
-                  <View key={index} style={{ position: "relative", margin: 5 }}>
+                  <View
+                    key={index}
+                    style={{
+                      position: "relative",
+                      margin: 5,
+                      backgroundColor: currentTheme.surface,
+                    }}
+                  >
                     {img.uri && (
                       <>
                         <Image
                           source={{ uri: img.uri }}
-                          style={{ width: 100, height: 100, borderRadius: 5 }}
+                          style={{
+                            width: 100,
+                            height: 100,
+                            borderRadius: 5,
+                          }}
                         />
                         <View
                           style={{
@@ -482,7 +537,7 @@ export default function App() {
                         >
                           <Text
                             style={{
-                              color: theme.dark.text,
+                              color: currentTheme.text,
                               fontSize: 10,
                               textAlign: "center",
                             }}
@@ -495,7 +550,7 @@ export default function App() {
                             position: "absolute",
                             top: 5,
                             right: 5,
-                            backgroundColor: theme.dark.error,
+                            backgroundColor: currentTheme.error,
                             borderRadius: 12,
                             width: 24,
                             height: 24,
@@ -506,7 +561,7 @@ export default function App() {
                         >
                           <Text
                             style={{
-                              color: theme.dark.text,
+                              color: currentTheme.text,
                               fontSize: 16,
                               fontWeight: "bold",
                             }}
@@ -523,7 +578,7 @@ export default function App() {
             <Button
               title="Close"
               onPress={() => setModalVisible(false)}
-              color={theme.dark.primary}
+              color={currentTheme.primary}
             />
           </View>
         </View>
