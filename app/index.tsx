@@ -182,44 +182,72 @@ export default function App() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 0.5,
+      allowsMultipleSelection: true,
+      // selectionLimit: 10,
     });
 
     if (!result.canceled) {
-      console.log("🖼️ Image selected:", result.assets[0].uri);
-      const localUri = result.assets[0].uri;
-      const newPath = FileSystem.documentDirectory + `${Date.now()}.jpg`;
+      console.log(`🖼️ ${result.assets.length} images selected`);
 
-      console.log("📁 Copying to local storage:", newPath);
-      await FileSystem.copyAsync({ from: localUri, to: newPath });
+      const newImages = await Promise.all(
+        result.assets.map(async (asset) => {
+          const localUri = asset.uri;
+          const newPath =
+            FileSystem.documentDirectory +
+            `${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`;
 
-      const newImage = {
-        uri: newPath,
-        uploadStatus: "uploading",
-        uploadError: null,
-        uploadDate: null,
-      };
+          console.log("📁 Copying to local storage:", newPath);
+          await FileSystem.copyAsync({ from: localUri, to: newPath });
+
+          return {
+            uri: newPath,
+            uploadStatus: "uploading",
+            uploadError: null,
+            uploadDate: null,
+          };
+        })
+      );
 
       console.log("💾 Saving to local state...");
-      const updatedImages = [newImage, ...savedImages];
+      const updatedImages = [...newImages, ...savedImages];
       setSavedImages(updatedImages);
       await AsyncStorage.setItem("savedImages", JSON.stringify(updatedImages));
 
-      console.log("🚀 Starting upload process...");
-      const uploadedImage = await uploadImageToCloud(newImage);
-      const finalImages = [uploadedImage, ...savedImages];
+      // Upload each image
+      console.log("🚀 Starting upload process for multiple images...");
+      const uploadedImages = await Promise.all(
+        newImages.map(async (newImage) => {
+          const uploadedImage = await uploadImageToCloud(newImage);
+          return uploadedImage;
+        })
+      );
+
+      const finalImages = [...uploadedImages, ...savedImages];
       setSavedImages(finalImages);
       await AsyncStorage.setItem("savedImages", JSON.stringify(finalImages));
 
-      console.log("✅ Image process complete:", uploadedImage.uploadStatus);
+      // Show summary toast
+      const successCount = uploadedImages.filter(
+        (img) => img.uploadStatus === "success"
+      ).length;
+      console.log(
+        "✅ Image process complete:",
+        `${successCount}/${uploadedImages.length} uploaded`
+      );
+
       Toast.show({
-        type: uploadedImage.uploadStatus === "success" ? "success" : "info",
-        text1: uploadedImage.uploadStatus === "success" ? "Success" : "Note",
-        text2:
-          uploadedImage.uploadStatus === "success"
-            ? "Image added and uploaded to cloud"
-            : `Image saved locally. ${
-                uploadedImage.uploadError || "Will upload when online."
-              }`,
+        type: successCount === uploadedImages.length ? "success" : "info",
+        text1:
+          successCount === uploadedImages.length ? "Success" : "Upload Status",
+        text2: `${successCount} of ${uploadedImages.length} images ${
+          successCount === 1 ? "was" : "were"
+        } uploaded successfully${
+          successCount < uploadedImages.length
+            ? `. ${
+                uploadedImages.length - successCount
+              } will upload when online.`
+            : "."
+        }`,
       });
     } else {
       console.log("❌ Image selection cancelled");

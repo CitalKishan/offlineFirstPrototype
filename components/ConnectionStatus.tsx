@@ -1,11 +1,13 @@
-import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import React from "react";
+import { View, Text, StyleSheet } from "react-native";
 
 interface ConnectionStatusProps {
   isConnected: boolean;
 }
 
-export const ConnectionStatus: React.FC<ConnectionStatusProps> = ({ isConnected }) => {
+export const ConnectionStatus: React.FC<ConnectionStatusProps> = ({
+  isConnected,
+}) => {
   return (
     <View
       style={[
@@ -13,9 +15,7 @@ export const ConnectionStatus: React.FC<ConnectionStatusProps> = ({ isConnected 
         { backgroundColor: isConnected ? "green" : "red" },
       ]}
     >
-      <Text style={styles.text}>
-        {isConnected ? "Connected" : "Offline"}
-      </Text>
+      <Text style={styles.text}>{isConnected ? "Connected" : "Offline"}</Text>
     </View>
   );
 };
