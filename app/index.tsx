@@ -116,6 +116,19 @@ export default function App() {
       setIsConnected(isConnected);
 
       if (isConnected) {
+        // When connection is restored, add error status images back to upload queue
+        setSavedImages((prev) => {
+          const failedUploads = prev.filter(
+            (img) =>
+              img.uploadStatus === "error" || img.uploadStatus === "pending"
+          );
+          if (failedUploads.length > 0) {
+            console.log(`🔄 Retrying ${failedUploads.length} failed uploads`);
+            setUploadQueue((prevQueue) => [...prevQueue, ...failedUploads]);
+          }
+          return prev;
+        });
+
         processUploadQueue();
         processQueuedDeletions();
       }
@@ -175,15 +188,16 @@ export default function App() {
 
         setSavedImages(validImages);
 
-        // Add only pending images to upload queue
-        const pendingImages = validImages.filter(
-          (img) => img.uploadStatus === "pending"
+        // Add both pending and error status images to upload queue
+        const imagesToUpload = validImages.filter(
+          (img) =>
+            img.uploadStatus === "pending" || img.uploadStatus === "error"
         );
-        if (pendingImages.length > 0) {
+        if (imagesToUpload.length > 0) {
           console.log(
-            `📤 Adding ${pendingImages.length} pending images to upload queue`
+            `📤 Adding ${imagesToUpload.length} images to upload queue (pending + failed)`
           );
-          setUploadQueue((prev) => [...prev, ...pendingImages]);
+          setUploadQueue((prev) => [...prev, ...imagesToUpload]);
         }
       } else {
         console.log("No saved images found");
@@ -306,10 +320,10 @@ export default function App() {
     console.log(`☁️ Step 6: Starting cloud upload for: ${imageInfo.uri}`);
 
     if (!isConnected) {
-      console.log("📶 No internet connection, marking as pending");
+      console.log("📶 No internet connection, keeping previous status");
       return {
         ...imageInfo,
-        uploadStatus: "pending",
+        uploadStatus: imageInfo.uploadStatus, // Keep existing status
         uploadError: "No internet connection",
       };
     }
@@ -393,9 +407,13 @@ export default function App() {
           ? (error as { message: string }).message
           : "Upload failed";
 
+      // Set status back to pending for network errors
+      const isNetworkError =
+        errorMessage.toLowerCase().includes("network") || !isConnected;
+
       return {
         ...imageInfo,
-        uploadStatus: "error",
+        uploadStatus: isNetworkError ? "pending" : "error",
         uploadError: errorMessage,
       };
     }
