@@ -28,18 +28,19 @@ const supabase = createClient(
 const STORAGE_BUCKET = configData.supabase.bucketName;
 const TOAST_DURATION = configData.toast?.duration || 1000; // Fallback to 1000ms if not defined
 
+// Add constants for AsyncStorage keys
+const STORAGE_KEYS = {
+  SAVED_IMAGES: "savedImages",
+  OFFLINE_DELETE_QUEUE: "offlineDeleteQueue",
+  ONLINE_DELETE_QUEUE: "onlineDeleteQueue",
+} as const;
+
 interface ImageInfo {
   uri: string;
-  uploadStatus:
-    | "pending"
-    | "uploading"
-    | "success"
-    | "error"
-    | "pending_deletion";
+  uploadStatus: "pending" | "uploading" | "success" | "error";
   uploadError: string | null;
   uploadDate: string | null;
   cloudPath?: string;
-  deletionQueuedAt?: string;
 }
 
 // Add type for toast props
@@ -107,6 +108,10 @@ export default function App() {
   const [processingImages, setProcessingImages] = useState<Set<string>>(
     new Set()
   );
+  const [offlineDeleteQueue, setOfflineDeleteQueue] = useState<ImageInfo[]>([]);
+  const [onlineDeleteQueue, setOnlineDeleteQueue] = useState<
+    { uri: string; cloudPath: string }[]
+  >([]);
 
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener((state) => {
@@ -130,7 +135,6 @@ export default function App() {
         });
 
         processUploadQueue();
-        processQueuedDeletions();
       }
     });
 
@@ -153,12 +157,50 @@ export default function App() {
     loadSavedImages();
   }, []);
 
+  useEffect(() => {
+    if (offlineDeleteQueue.length > 0) {
+      processOfflineDeleteQueue();
+    }
+  }, [offlineDeleteQueue.length]);
+
+  useEffect(() => {
+    if (isConnected && onlineDeleteQueue.length > 0) {
+      processOnlineDeleteQueue();
+    }
+  }, [isConnected, onlineDeleteQueue.length]);
+
   const loadSavedImages = async () => {
-    console.log("🔄 Loading saved images...");
+    console.log("🔄 Loading saved images and queues...");
     try {
-      const saved = await AsyncStorage.getItem("savedImages");
-      if (saved) {
-        const parsed = JSON.parse(saved);
+      // Load all data in parallel
+      const [savedImagesData, offlineQueueData, onlineQueueData] =
+        await Promise.all([
+          AsyncStorage.getItem(STORAGE_KEYS.SAVED_IMAGES),
+          AsyncStorage.getItem(STORAGE_KEYS.OFFLINE_DELETE_QUEUE),
+          AsyncStorage.getItem(STORAGE_KEYS.ONLINE_DELETE_QUEUE),
+        ]);
+
+      // Restore offline delete queue
+      if (offlineQueueData) {
+        const offlineQueue = JSON.parse(offlineQueueData);
+        console.log(
+          `📥 Restored offline delete queue: ${offlineQueue.length} items`
+        );
+        setOfflineDeleteQueue(offlineQueue);
+      }
+
+      // Restore online delete queue
+      if (onlineQueueData) {
+        const onlineQueue = JSON.parse(onlineQueueData);
+        console.log(
+          `☁️ Restored online delete queue: ${onlineQueue.length} items`
+        );
+        setOnlineDeleteQueue(onlineQueue);
+      }
+
+      // Load saved images (existing logic)
+      if (savedImagesData) {
+        const parsed = JSON.parse(savedImagesData);
 
         // Wait for all file existence checks to complete
         const validImagesPromises = await Promise.all(
@@ -223,25 +265,16 @@ export default function App() {
           );
           setUploadQueue((prev) => [...prev, ...imagesToUpload]);
         }
-
-        // Process any remaining queued deletions
-        const pendingDeletions = validImages.filter(
-          (img) => img.uploadStatus === "pending_deletion"
-        );
-        if (pendingDeletions.length > 0 && isConnected) {
-          console.log(`🗑️ Found ${pendingDeletions.length} pending deletions`);
-          processQueuedDeletions();
-        }
       } else {
         console.log("No saved images found");
         setSavedImages([]);
       }
     } catch (error) {
-      console.error("❌ Error loading images:", error);
+      console.error("❌ Error loading data:", error);
       Toast.show({
         type: "error",
-        text1: "Error Loading Images",
-        text2: "Failed to load saved images",
+        text1: "Error Loading Data",
+        text2: "Failed to restore app state",
         visibilityTime: TOAST_DURATION,
       });
       setSavedImages([]);
@@ -333,7 +366,7 @@ export default function App() {
         setSavedImages(newSavedImages);
         setUploadQueue((prev) => [...prev, ...validImages]);
         await AsyncStorage.setItem(
-          "savedImages",
+          STORAGE_KEYS.SAVED_IMAGES,
           JSON.stringify(newSavedImages)
         );
       }
@@ -456,7 +489,7 @@ export default function App() {
     if (!isConnected || uploadQueue.length === 0) return;
 
     console.log(`🔄 Processing upload queue: ${uploadQueue.length} items`);
-    console.log("🔄 Upload queue:", uploadQueue);
+    // console.log("🔄 Upload queue:", uploadQueue);
 
     try {
       const currentQueue = [...uploadQueue];
@@ -509,7 +542,7 @@ export default function App() {
             // Save to AsyncStorage immediately after each successful upload
             if (result.uploadStatus === "success") {
               AsyncStorage.setItem(
-                "savedImages",
+                STORAGE_KEYS.SAVED_IMAGES,
                 JSON.stringify(newSavedImages)
               ).catch((err) =>
                 console.error("Failed to save upload status:", err)
@@ -573,7 +606,15 @@ export default function App() {
 
     console.log("🗑️ Starting delete process for image:", imageToDelete);
 
-    // If image is pending upload, remove from upload queue first
+    // Add to offline delete queue and persist
+    const newOfflineQueue = [...offlineDeleteQueue, imageToDelete];
+    setOfflineDeleteQueue(newOfflineQueue);
+    await AsyncStorage.setItem(
+      STORAGE_KEYS.OFFLINE_DELETE_QUEUE,
+      JSON.stringify(newOfflineQueue)
+    );
+
+    // Remove from upload queue if pending
     if (imageToDelete.uploadStatus === "pending") {
       console.log("📤 Removing from upload queue...");
       setUploadQueue((prev) =>
@@ -581,167 +622,130 @@ export default function App() {
       );
     }
 
-    // If not connected and image was uploaded successfully
-    if (!isConnected && imageToDelete.uploadStatus === "success") {
-      console.log("📶 Offline detected, queueing for deletion");
-      const updatedImages = savedImages.map((img, i) => {
-        if (i === index) {
-          return {
-            ...img,
-            uploadStatus: "pending_deletion" as const,
-            deletionQueuedAt: new Date().toISOString(),
-          };
-        }
-        return img;
-      });
+    Toast.show({
+      type: "info",
+      text1: "Deletion Started",
+      text2: "Image queued for deletion",
+      visibilityTime: TOAST_DURATION,
+    });
+  };
 
-      setSavedImages(updatedImages);
-      await AsyncStorage.setItem("savedImages", JSON.stringify(updatedImages));
+  const processOfflineDeleteQueue = async () => {
+    console.log(
+      `🗑️ Processing offline delete queue: ${offlineDeleteQueue.length} items`
+    );
 
-      console.log("✅ Image queued for deletion");
-      Toast.show({
-        type: "info",
-        text1: "Queued for Deletion",
-        text2: "Image will be deleted when internet connection is restored",
-        visibilityTime: TOAST_DURATION,
-      });
-      return;
-    } else if (
-      imageToDelete.uploadStatus === "success" &&
-      imageToDelete.cloudPath
-    ) {
-      console.log(
-        "☁️ Attempting to delete from cloud:",
-        imageToDelete.cloudPath
-      );
-      try {
-        const { error } = await supabase.storage
-          .from(STORAGE_BUCKET)
-          .remove([imageToDelete.cloudPath]);
-
-        if (error) {
-          console.error("❌ Cloud deletion failed:", error);
-          Toast.show({
-            type: "error",
-            text1: "Cloud Deletion Failed",
-            text2: error.message,
-            visibilityTime: TOAST_DURATION,
-          });
-          return;
-        }
-
-        console.log("✅ Successfully deleted from cloud");
-        Toast.show({
-          type: "success",
-          text1: "Cloud Deletion",
-          text2: "Successfully removed from cloud storage",
-          visibilityTime: TOAST_DURATION,
-        });
-      } catch (error) {
-        console.error("❌ Cloud deletion error:", error);
-        Toast.show({
-          type: "error",
-          text1: "Cloud Deletion Error",
-          text2: error.message,
-          visibilityTime: TOAST_DURATION,
-        });
-        return;
-      }
-    }
-
-    // Remove from local storage and saved images
-    console.log("🗑️ Removing from local storage");
     try {
-      // Delete the actual file
+      const imageToDelete = offlineDeleteQueue[0];
+
+      // Delete from local storage
       await FileSystem.deleteAsync(imageToDelete.uri, { idempotent: true });
-      console.log("✅ File deleted from local storage");
+      console.log("✅ File deleted from local storage:", imageToDelete.uri);
 
-      // Update saved images state
-      const updatedImages = savedImages.filter((_, i) => i !== index);
+      // If image was uploaded, add to online delete queue
+      if (imageToDelete.uploadStatus === "success" && imageToDelete.cloudPath) {
+        const newOnlineQueue = [
+          ...onlineDeleteQueue,
+          {
+            uri: imageToDelete.uri,
+            cloudPath: imageToDelete.cloudPath,
+          },
+        ];
+        setOnlineDeleteQueue(newOnlineQueue);
+        // Persist online queue
+        await AsyncStorage.setItem(
+          STORAGE_KEYS.ONLINE_DELETE_QUEUE,
+          JSON.stringify(newOnlineQueue)
+        );
+      }
+
+      // Remove from saved images
+      const updatedImages = savedImages.filter(
+        (img) => img.uri !== imageToDelete.uri
+      );
       setSavedImages(updatedImages);
-      await AsyncStorage.setItem("savedImages", JSON.stringify(updatedImages));
+      await AsyncStorage.setItem(
+        STORAGE_KEYS.SAVED_IMAGES,
+        JSON.stringify(updatedImages)
+      );
 
-      console.log("✅ Deletion complete");
+      // Update offline queue
+      const newOfflineQueue = offlineDeleteQueue.slice(1);
+      setOfflineDeleteQueue(newOfflineQueue);
+      await AsyncStorage.setItem(
+        STORAGE_KEYS.OFFLINE_DELETE_QUEUE,
+        JSON.stringify(newOfflineQueue)
+      );
+
       Toast.show({
         type: "success",
-        text1: "Deletion Complete",
-        text2:
-          imageToDelete.uploadStatus === "success"
-            ? "Deleted from both cloud and local storage"
-            : "Deleted from local storage",
+        text1: "Local Deletion Complete",
+        text2: "Image deleted from device storage",
         visibilityTime: TOAST_DURATION,
       });
     } catch (error) {
-      console.error("❌ Error deleting file:", error);
+      console.error("❌ Error in offline deletion:", error);
       Toast.show({
         type: "error",
         text1: "Deletion Error",
-        text2: "Failed to delete file from storage",
+        text2: "Failed to delete file from local storage",
         visibilityTime: TOAST_DURATION,
       });
+
+      // Update offline queue even on failure
+      const newOfflineQueue = offlineDeleteQueue.slice(1);
+      setOfflineDeleteQueue(newOfflineQueue);
+      await AsyncStorage.setItem(
+        STORAGE_KEYS.OFFLINE_DELETE_QUEUE,
+        JSON.stringify(newOfflineQueue)
+      );
     }
   };
 
-  const processQueuedDeletions = async () => {
-    console.log("🔄 Checking for queued deletions...");
-    const queuedImages = savedImages.filter(
-      (img) => img.uploadStatus === "pending_deletion"
-    );
-
-    if (queuedImages.length === 0) {
-      console.log("ℹ️ No queued deletions found");
-      return;
-    }
-
-    console.log(`📤 Processing ${queuedImages.length} queued deletions...`);
-    Toast.show({
-      type: "info",
-      text1: "Processing Queue",
-      text2: `Processing ${queuedImages.length} queued deletions...`,
-      visibilityTime: TOAST_DURATION,
-    });
-
-    let successCount = 0;
-    let failureCount = 0;
-
-    for (const image of queuedImages) {
-      if (!image.cloudPath) continue;
-
-      console.log("🗑️ Processing deletion:", image.cloudPath);
-      try {
-        const { error } = await supabase.storage
-          .from(STORAGE_BUCKET)
-          .remove([image.cloudPath]);
-
-        if (!error) {
-          console.log("✅ Successfully deleted from cloud");
-          successCount++;
-        } else {
-          console.error("❌ Failed to delete from cloud:", error);
-          failureCount++;
-        }
-      } catch (error) {
-        console.error("❌ Deletion error:", error);
-        failureCount++;
-      }
-    }
-
-    console.log("🧹 Cleaning up local state...");
-    const remainingImages = savedImages.filter(
-      (img) => img.uploadStatus !== "pending_deletion"
-    );
-    setSavedImages(remainingImages);
-    await AsyncStorage.setItem("savedImages", JSON.stringify(remainingImages));
+  const processOnlineDeleteQueue = async () => {
+    if (!isConnected || onlineDeleteQueue.length === 0) return;
 
     console.log(
-      `✅ Queue processing complete. Success: ${successCount}, Failed: ${failureCount}`
+      `☁️ Processing online delete queue: ${onlineDeleteQueue.length} items`
     );
-    Toast.show({
-      type: "success",
-      text1: "Queue Processing Complete",
-      text2: `Deleted: ${successCount}, Failed: ${failureCount}`,
-      visibilityTime: TOAST_DURATION,
-    });
+
+    try {
+      const itemToDelete = onlineDeleteQueue[0];
+
+      const { error } = await supabase.storage
+        .from(STORAGE_BUCKET)
+        .remove([itemToDelete.cloudPath]);
+
+      if (error) throw error;
+
+      console.log(
+        "✅ Successfully deleted from cloud:",
+        itemToDelete.cloudPath
+      );
+
+      // Update and persist queue
+      const newQueue = onlineDeleteQueue.slice(1);
+      setOnlineDeleteQueue(newQueue);
+      await AsyncStorage.setItem(
+        STORAGE_KEYS.ONLINE_DELETE_QUEUE,
+        JSON.stringify(newQueue)
+      );
+
+      Toast.show({
+        type: "success",
+        text1: "Cloud Deletion Complete",
+        text2: "Image deleted from cloud storage",
+        visibilityTime: TOAST_DURATION,
+      });
+    } catch (error) {
+      console.error("❌ Error in online deletion:", error);
+      Toast.show({
+        type: "error",
+        text1: "Cloud Deletion Error",
+        text2: "Failed to delete from cloud. Will retry later.",
+        visibilityTime: TOAST_DURATION,
+      });
+    }
   };
 
   const toggleTheme = () => {
