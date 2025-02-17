@@ -25,6 +25,7 @@ const supabase = createClient(
   configData.supabase.url,
   configData.supabase.anonKey
 );
+const STORAGE_BUCKET = configData.supabase.bucketName;
 
 interface ImageInfo {
   uri: string;
@@ -318,7 +319,7 @@ export default function App() {
 
       // Check if file was already uploaded
       const { data: existingFiles } = await supabase.storage
-        .from("images")
+        .from(STORAGE_BUCKET)
         .list();
 
       const alreadyUploaded = existingFiles?.some((file) => {
@@ -351,7 +352,7 @@ export default function App() {
       } as any);
 
       const { data, error } = await supabase.storage
-        .from("images")
+        .from(STORAGE_BUCKET)
         .upload(fileName, formData, {
           contentType: "multipart/form-data",
           upsert: false, // Prevent overwriting existing files
@@ -523,7 +524,7 @@ export default function App() {
       );
       try {
         const { error } = await supabase.storage
-          .from("images")
+          .from(STORAGE_BUCKET)
           .remove([imageToDelete.cloudPath]);
 
         if (error) {
@@ -596,7 +597,7 @@ export default function App() {
       console.log("🗑️ Processing deletion:", image.cloudPath);
       try {
         const { error } = await supabase.storage
-          .from("images")
+          .from(STORAGE_BUCKET)
           .remove([image.cloudPath]);
 
         if (!error) {
