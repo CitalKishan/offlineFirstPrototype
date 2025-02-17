@@ -26,6 +26,7 @@ const supabase = createClient(
   configData.supabase.anonKey
 );
 const STORAGE_BUCKET = configData.supabase.bucketName;
+const TOAST_DURATION = configData.toast?.duration || 1000; // Fallback to 1000ms if not defined
 
 interface ImageInfo {
   uri: string;
@@ -194,6 +195,7 @@ export default function App() {
         type: "error",
         text1: "Error Loading Images",
         text2: "Failed to load saved images",
+        visibilityTime: TOAST_DURATION,
       });
       setSavedImages([]);
     }
@@ -234,6 +236,7 @@ export default function App() {
         type: "error",
         text1: "Error",
         text2: "Failed to pick image. Please try again.",
+        visibilityTime: TOAST_DURATION,
       });
     }
   };
@@ -480,12 +483,14 @@ export default function App() {
               type: "success",
               text1: "Upload Success",
               text2: "Image uploaded successfully",
+              visibilityTime: TOAST_DURATION,
             });
           } else if (result.uploadStatus === "error") {
             Toast.show({
               type: "error",
               text1: "Upload Failed",
               text2: result.uploadError || "Unknown error occurred",
+              visibilityTime: TOAST_DURATION,
             });
           }
         } catch (error) {
@@ -506,6 +511,7 @@ export default function App() {
         type: "error",
         text1: "Upload Error",
         text2: "Failed to process upload queue",
+        visibilityTime: TOAST_DURATION,
       });
     }
   };
@@ -546,6 +552,7 @@ export default function App() {
         type: "info",
         text1: "Queued for Deletion",
         text2: "Image will be deleted when internet connection is restored",
+        visibilityTime: TOAST_DURATION,
       });
       return;
     } else if (
@@ -567,6 +574,7 @@ export default function App() {
             type: "error",
             text1: "Cloud Deletion Failed",
             text2: error.message,
+            visibilityTime: TOAST_DURATION,
           });
           return;
         }
@@ -576,6 +584,7 @@ export default function App() {
           type: "success",
           text1: "Cloud Deletion",
           text2: "Successfully removed from cloud storage",
+          visibilityTime: TOAST_DURATION,
         });
       } catch (error) {
         console.error("❌ Cloud deletion error:", error);
@@ -583,6 +592,7 @@ export default function App() {
           type: "error",
           text1: "Cloud Deletion Error",
           text2: error.message,
+          visibilityTime: TOAST_DURATION,
         });
         return;
       }
@@ -608,6 +618,7 @@ export default function App() {
           imageToDelete.uploadStatus === "success"
             ? "Deleted from both cloud and local storage"
             : "Deleted from local storage",
+        visibilityTime: TOAST_DURATION,
       });
     } catch (error) {
       console.error("❌ Error deleting file:", error);
@@ -615,6 +626,7 @@ export default function App() {
         type: "error",
         text1: "Deletion Error",
         text2: "Failed to delete file from storage",
+        visibilityTime: TOAST_DURATION,
       });
     }
   };
@@ -635,6 +647,7 @@ export default function App() {
       type: "info",
       text1: "Processing Queue",
       text2: `Processing ${queuedImages.length} queued deletions...`,
+      visibilityTime: TOAST_DURATION,
     });
 
     let successCount = 0;
@@ -676,6 +689,7 @@ export default function App() {
       type: "success",
       text1: "Queue Processing Complete",
       text2: `Deleted: ${successCount}, Failed: ${failureCount}`,
+      visibilityTime: TOAST_DURATION,
     });
   };
 
