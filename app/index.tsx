@@ -112,6 +112,9 @@ export default function App() {
   const [onlineDeleteQueue, setOnlineDeleteQueue] = useState<
     { uri: string; cloudPath: string }[]
   >([]);
+  const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
+  const [onlineQueueTimeout, setOnlineQueueTimeout] =
+    useState<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener((state) => {
@@ -164,10 +167,32 @@ export default function App() {
   }, [offlineDeleteQueue.length]);
 
   useEffect(() => {
-    if (isConnected && onlineDeleteQueue.length > 0) {
-      processOnlineDeleteQueue();
+    // Clear any existing timeout when dependencies change
+    if (onlineQueueTimeout) {
+      clearTimeout(onlineQueueTimeout);
     }
-  }, [isConnected, onlineDeleteQueue.length]);
+
+    // Only schedule online processing if offline queue is empty
+    if (
+      offlineDeleteQueue.length === 0 &&
+      isConnected &&
+      onlineDeleteQueue.length > 0
+    ) {
+      console.log("📅 Scheduling online queue processing in 500ms...");
+      const timeout = setTimeout(() => {
+        processOnlineDeleteQueue();
+      }, 500);
+
+      setOnlineQueueTimeout(timeout);
+    }
+
+    // Cleanup timeout on unmount or when dependencies change
+    return () => {
+      if (onlineQueueTimeout) {
+        clearTimeout(onlineQueueTimeout);
+      }
+    };
+  }, [isConnected, onlineDeleteQueue.length, offlineDeleteQueue.length]);
 
   const loadSavedImages = async () => {
     console.log("🔄 Loading saved images and queues...");
@@ -752,6 +777,57 @@ export default function App() {
     setThemeMode((prevMode) => (prevMode === "dark" ? "light" : "dark"));
   };
 
+  const toggleImageSelection = (imageUri: string) => {
+    setSelectedImages((prev) => {
+      const newSelection = new Set(prev);
+      if (newSelection.has(imageUri)) {
+        newSelection.delete(imageUri);
+      } else {
+        newSelection.add(imageUri);
+      }
+      return newSelection;
+    });
+  };
+
+  const deleteSelectedImages = async () => {
+    console.log(`🗑️ Starting batch deletion of ${selectedImages.size} images`);
+
+    // Get all selected image info
+    const imagesToDelete = savedImages.filter((img) =>
+      selectedImages.has(img.uri)
+    );
+
+    // Add all to offline delete queue and persist
+    const newOfflineQueue = [...offlineDeleteQueue, ...imagesToDelete];
+    setOfflineDeleteQueue(newOfflineQueue);
+    await AsyncStorage.setItem(
+      STORAGE_KEYS.OFFLINE_DELETE_QUEUE,
+      JSON.stringify(newOfflineQueue)
+    );
+
+    // Remove any pending uploads from upload queue
+    const pendingUris = new Set(
+      imagesToDelete
+        .filter((img) => img.uploadStatus === "pending")
+        .map((img) => img.uri)
+    );
+
+    if (pendingUris.size > 0) {
+      console.log("📤 Removing selected images from upload queue...");
+      setUploadQueue((prev) => prev.filter((img) => !pendingUris.has(img.uri)));
+    }
+
+    // Clear selection
+    setSelectedImages(new Set());
+
+    Toast.show({
+      type: "info",
+      text1: "Batch Deletion Started",
+      text2: `${selectedImages.size} images queued for deletion`,
+      visibilityTime: TOAST_DURATION,
+    });
+  };
+
   return (
     <View
       style={[styles.container, { backgroundColor: currentTheme.background }]}
@@ -765,13 +841,41 @@ export default function App() {
         currentTheme={currentTheme}
         onThemeToggle={toggleTheme}
       />
+
+      {selectedImages.size > 0 && (
+        <View
+          style={[
+            styles.selectionHeader,
+            { backgroundColor: currentTheme.primary },
+          ]}
+        >
+          <Text style={styles.selectionText}>
+            {selectedImages.size} selected
+          </Text>
+          <TouchableOpacity
+            style={styles.deleteButton}
+            onPress={deleteSelectedImages}
+          >
+            <Text style={styles.deleteButtonText}>Delete Selected</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       <ScrollView style={styles.scrollView}>
         <ImageGrid
           images={savedImages}
           currentTheme={currentTheme}
+          selectedImages={selectedImages}
           onImagePress={(image) => {
-            setSelectedImage(image);
-            setModalVisible(true);
+            if (selectedImages.size > 0) {
+              toggleImageSelection(image.uri);
+            } else {
+              setSelectedImage(image);
+              setModalVisible(true);
+            }
+          }}
+          onLongPress={(image) => {
+            toggleImageSelection(image.uri);
           }}
           onDeleteImage={deleteImage}
         />
@@ -819,6 +923,32 @@ const styles = StyleSheet.create({
   addButtonText: {
     color: "white",
     fontSize: 24,
+    fontWeight: "bold",
+  },
+  selectionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: 16,
+    elevation: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+  },
+  selectionText: {
+    color: "white",
+    fontSize: 18,
+    fontWeight: "bold",
+  },
+  deleteButton: {
+    backgroundColor: "#e74c3c",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 4,
+  },
+  deleteButtonText: {
+    color: "white",
     fontWeight: "bold",
   },
 });

@@ -1,18 +1,29 @@
-import React from 'react';
-import { View, Image, TouchableOpacity, Text, StyleSheet, ActivityIndicator } from 'react-native';
-import { ThemeColors } from '../utils/theme';
+import React from "react";
+import {
+  View,
+  Image,
+  TouchableOpacity,
+  Text,
+  StyleSheet,
+  ActivityIndicator,
+} from "react-native";
+import { ThemeColors } from "../utils/theme";
 
 interface ImageGridProps {
   images: any[];
   currentTheme: ThemeColors;
+  selectedImages: Set<string>;
   onImagePress: (image: any) => void;
+  onLongPress: (image: any) => void;
   onDeleteImage: (index: number) => void;
 }
 
 export const ImageGrid: React.FC<ImageGridProps> = ({
   images,
   currentTheme,
+  selectedImages,
   onImagePress,
+  onLongPress,
   onDeleteImage,
 }) => {
   const getStatusColor = (status: string) => {
@@ -54,11 +65,13 @@ export const ImageGrid: React.FC<ImageGridProps> = ({
       case "success":
         return `Uploaded\n${new Date(image.uploadDate).toLocaleString()}`;
       case "error":
-        return `Error\n${image.uploadError || 'Unknown error'}`;
+        return `Error\n${image.uploadError || "Unknown error"}`;
       case "uploading":
         return "Uploading...";
       case "pending_deletion":
-        return `Queued for deletion\n${new Date(image.deletionQueuedAt).toLocaleString()}`;
+        return `Queued for deletion\n${new Date(
+          image.deletionQueuedAt
+        ).toLocaleString()}`;
       case "pending":
         return "Queued for upload";
       default:
@@ -71,20 +84,28 @@ export const ImageGrid: React.FC<ImageGridProps> = ({
       {images.map((image, index) => (
         <TouchableOpacity
           key={image.uri}
-          style={[styles.imageContainer, { backgroundColor: currentTheme.surface }]}
+          style={[
+            styles.imageContainer,
+            selectedImages.has(image.uri) && styles.selectedImage,
+          ]}
           onPress={() => onImagePress(image)}
+          onLongPress={() => onLongPress(image)}
         >
           <Image source={{ uri: image.uri }} style={styles.image} />
-          
+
           {/* Status Overlay */}
-          <View style={[
-            styles.statusOverlay,
-            { backgroundColor: `${currentTheme.surface}CC` }
-          ]}>
-            <View style={[
-              styles.statusIconContainer,
-              { backgroundColor: getStatusColor(image.uploadStatus) }
-            ]}>
+          <View
+            style={[
+              styles.statusOverlay,
+              { backgroundColor: `${currentTheme.surface}CC` },
+            ]}
+          >
+            <View
+              style={[
+                styles.statusIconContainer,
+                { backgroundColor: getStatusColor(image.uploadStatus) },
+              ]}
+            >
               <Text style={styles.statusIcon}>
                 {getStatusIcon(image.uploadStatus)}
               </Text>
@@ -96,18 +117,32 @@ export const ImageGrid: React.FC<ImageGridProps> = ({
 
           {/* Loading Indicator */}
           {image.uploadStatus === "uploading" && (
-            <View style={[styles.loadingOverlay, { backgroundColor: `${currentTheme.surface}99` }]}>
+            <View
+              style={[
+                styles.loadingOverlay,
+                { backgroundColor: `${currentTheme.surface}99` },
+              ]}
+            >
               <ActivityIndicator size="large" color={currentTheme.primary} />
             </View>
           )}
 
           {/* Delete Button */}
           <TouchableOpacity
-            style={[styles.deleteButton, { backgroundColor: currentTheme.error }]}
+            style={[
+              styles.deleteButton,
+              { backgroundColor: currentTheme.error },
+            ]}
             onPress={() => onDeleteImage(index)}
           >
             <Text style={styles.deleteButtonText}>×</Text>
           </TouchableOpacity>
+
+          {selectedImages.has(image.uri) && (
+            <View style={styles.checkmark}>
+              <Text style={styles.checkmarkText}>✓</Text>
+            </View>
+          )}
         </TouchableOpacity>
       ))}
     </View>
@@ -116,23 +151,23 @@ export const ImageGrid: React.FC<ImageGridProps> = ({
 
 const styles = StyleSheet.create({
   grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: "row",
+    flexWrap: "wrap",
     padding: 4,
   },
   imageContainer: {
-    width: '33.33%',
+    width: "33.33%",
     aspectRatio: 1,
     padding: 4,
-    position: 'relative',
+    position: "relative",
   },
   image: {
-    width: '100%',
-    height: '100%',
+    width: "100%",
+    height: "100%",
     borderRadius: 8,
   },
   statusOverlay: {
-    position: 'absolute',
+    position: "absolute",
     bottom: 4,
     left: 4,
     right: 4,
@@ -144,38 +179,57 @@ const styles = StyleSheet.create({
     width: 24,
     height: 24,
     borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     marginBottom: 4,
   },
   statusIcon: {
-    color: 'white',
+    color: "white",
     fontSize: 14,
-    fontWeight: 'bold',
+    fontWeight: "bold",
   },
   statusText: {
     fontSize: 10,
-    textAlign: 'center',
+    textAlign: "center",
   },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     borderRadius: 8,
   },
   deleteButton: {
-    position: 'absolute',
+    position: "absolute",
     top: 8,
     right: 8,
     width: 24,
     height: 24,
     borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   deleteButtonText: {
-    color: 'white',
+    color: "white",
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: "bold",
+  },
+  selectedImage: {
+    borderWidth: 3,
+    borderColor: "#2ecc71",
+  },
+  checkmark: {
+    position: "absolute",
+    top: 5,
+    right: 5,
+    backgroundColor: "#2ecc71",
+    borderRadius: 12,
+    width: 24,
+    height: 24,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  checkmarkText: {
+    color: "white",
+    fontWeight: "bold",
   },
 });
