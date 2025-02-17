@@ -170,7 +170,31 @@ export default function App() {
             try {
               const fileInfo = await FileSystem.getInfoAsync(img.uri);
               if (fileInfo.exists) {
-                // Keep the existing status - don't modify already uploaded images
+                // If image is pending deletion and we're online, process it immediately
+                if (img.uploadStatus === "pending_deletion" && isConnected) {
+                  console.log("🗑️ Processing pending deletion:", img.cloudPath);
+                  if (img.cloudPath) {
+                    try {
+                      const { error } = await supabase.storage
+                        .from(STORAGE_BUCKET)
+                        .remove([img.cloudPath]);
+
+                      if (!error) {
+                        console.log(
+                          "✅ Successfully deleted from cloud during load"
+                        );
+                        // Don't include this image in valid images
+                        return null;
+                      }
+                    } catch (error) {
+                      console.error(
+                        "❌ Cloud deletion error during load:",
+                        error
+                      );
+                    }
+                  }
+                }
+                // Keep the existing status for other images
                 return img;
               }
               return null;
@@ -198,6 +222,15 @@ export default function App() {
             `📤 Adding ${imagesToUpload.length} images to upload queue (pending + failed)`
           );
           setUploadQueue((prev) => [...prev, ...imagesToUpload]);
+        }
+
+        // Process any remaining queued deletions
+        const pendingDeletions = validImages.filter(
+          (img) => img.uploadStatus === "pending_deletion"
+        );
+        if (pendingDeletions.length > 0 && isConnected) {
+          console.log(`🗑️ Found ${pendingDeletions.length} pending deletions`);
+          processQueuedDeletions();
         }
       } else {
         console.log("No saved images found");
