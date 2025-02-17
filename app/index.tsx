@@ -402,6 +402,7 @@ export default function App() {
     if (!isConnected || uploadQueue.length === 0) return;
 
     console.log(`🔄 Processing upload queue: ${uploadQueue.length} items`);
+    console.log("🔄 Upload queue:", uploadQueue);
 
     try {
       const currentQueue = [...uploadQueue];
@@ -414,6 +415,29 @@ export default function App() {
         // Skip if image is already being processed
         if (processingImages.has(imageHash)) {
           console.log(`⏭️ Skipping duplicate upload for: ${image.uri}`);
+          continue;
+        }
+
+        // Check if file still exists before processing
+        try {
+          const fileInfo = await FileSystem.getInfoAsync(image.uri);
+          if (!fileInfo.exists) {
+            console.log(`❌ File no longer exists: ${image.uri}`);
+            // Remove from upload queue if file doesn't exist
+            setUploadQueue((prev) =>
+              prev.filter((img) => img.uri !== image.uri)
+            );
+            // Remove from saved images if file doesn't exist
+            setSavedImages((prev) =>
+              prev.filter((img) => img.uri !== image.uri)
+            );
+            continue;
+          }
+        } catch (error) {
+          console.error(
+            `❌ Error checking file existence: ${image.uri}`,
+            error
+          );
           continue;
         }
 
@@ -492,6 +516,15 @@ export default function App() {
 
     console.log("🗑️ Starting delete process for image:", imageToDelete);
 
+    // If image is pending upload, remove from upload queue first
+    if (imageToDelete.uploadStatus === "pending") {
+      console.log("📤 Removing from upload queue...");
+      setUploadQueue((prev) =>
+        prev.filter((img) => img.uri !== imageToDelete.uri)
+      );
+    }
+
+    // If not connected and image was uploaded successfully
     if (!isConnected && imageToDelete.uploadStatus === "success") {
       console.log("📶 Offline detected, queueing for deletion");
       const updatedImages = savedImages.map((img, i) => {
@@ -515,9 +548,10 @@ export default function App() {
         text2: "Image will be deleted when internet connection is restored",
       });
       return;
-    }
-
-    if (imageToDelete.uploadStatus === "success" && imageToDelete.cloudPath) {
+    } else if (
+      imageToDelete.uploadStatus === "success" &&
+      imageToDelete.cloudPath
+    ) {
       console.log(
         "☁️ Attempting to delete from cloud:",
         imageToDelete.cloudPath
@@ -554,20 +588,35 @@ export default function App() {
       }
     }
 
+    // Remove from local storage and saved images
     console.log("🗑️ Removing from local storage");
-    const updatedImages = savedImages.filter((_, i) => i !== index);
-    setSavedImages(updatedImages);
-    await AsyncStorage.setItem("savedImages", JSON.stringify(updatedImages));
+    try {
+      // Delete the actual file
+      await FileSystem.deleteAsync(imageToDelete.uri, { idempotent: true });
+      console.log("✅ File deleted from local storage");
 
-    console.log("✅ Deletion complete");
-    Toast.show({
-      type: "success",
-      text1: "Deletion Complete",
-      text2:
-        imageToDelete.uploadStatus === "success"
-          ? "Deleted from both cloud and local storage"
-          : "Deleted from local storage",
-    });
+      // Update saved images state
+      const updatedImages = savedImages.filter((_, i) => i !== index);
+      setSavedImages(updatedImages);
+      await AsyncStorage.setItem("savedImages", JSON.stringify(updatedImages));
+
+      console.log("✅ Deletion complete");
+      Toast.show({
+        type: "success",
+        text1: "Deletion Complete",
+        text2:
+          imageToDelete.uploadStatus === "success"
+            ? "Deleted from both cloud and local storage"
+            : "Deleted from local storage",
+      });
+    } catch (error) {
+      console.error("❌ Error deleting file:", error);
+      Toast.show({
+        type: "error",
+        text1: "Deletion Error",
+        text2: "Failed to delete file from storage",
+      });
+    }
   };
 
   const processQueuedDeletions = async () => {
