@@ -51,7 +51,7 @@ Join our community of developers creating universal apps.
 
 # offlineFirstPrototype
 
--Testing steps before commiting to git
+-Testing steps before committing to git
 
 Internet connected
 Upload image
@@ -66,7 +66,12 @@ delete all images
 check if deleted
 upload multiple images and delete the last image before its been uploaded
 check number of images uploaded to cloud
-delete all images
+delete all images quickly
+check if all images are deleted from the cloud
+upload multiple images
+check if all images uploaded to cloud
+delete all images in batch
+check if all images deleted from cloud
 
 Persistent storage
 upload image
@@ -79,7 +84,8 @@ upload multiple images
 force stop the app
 reopen the app
 check if uploaded images are still there
-delete all images
+delete all images quickly and quickly reload the app
+check if all images are deleted from cloud
 
 BACK TO BACK PICK
 Pick image again at the time of uploading the image
@@ -136,12 +142,8 @@ turn internet on
 check if images persist there state.  
  check if image is deleted from the cloud
 turn internet off
-delete all images
+delete all images quickly
 reload the app
 turn internet on
 check if images persist there state.
 check if images deleted from the cloud
-
-Internet on
-at the time of uploading multiple images delete the already uploaded image
-At the time of uploading the image what will happen if user deletes the uploading image
