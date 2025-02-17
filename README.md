@@ -64,8 +64,33 @@ delete one image
 check if deleted
 delete all images
 check if deleted
+upload multiple images and delete the last image before its been uploaded
+check number of images uploaded to cloud
+delete all images
+
+Persistent storage
+upload image
+force stop the app
+reopen the app
+check the number of uploaded images
+Check the number of images showing in the device
+delete image
+upload multiple images
+force stop the app
+reopen the app
+check if uploaded images are still there
+delete all images
+
+BACK TO BACK PICK
+Pick image again at the time of uploading the image
+Pick multiple images again at the time of uploading multiple image
 
 Internet off
+upload image
+delete image
+turn internet on
+check if anything is on the cloud
+Turn internet off
 upload image
 turn internet on
 check image uploaded to cloud
@@ -87,16 +112,36 @@ turn internet on
 check if all images are deleted from cloud
 
 Persistent storage
-upload image
-force stop the app
-reopen the app
-check if upload images are still there
-delete image
+turn internet off
+upload an image
+reload the app
+check if image is showing in the app
+turn internet on
+check if image uploaded to the cloud
+turn internet off
+deleted image
+reload app
+turn internet on
+check if image is deleted form the cloud
+turn internet off
 upload multiple images
-force stop the app
-reopen the app
-check if uploaded images are still there
+reload the app
+turn internet on
+check if images are showing in the app
+check if images are uploaded to cloud
+turn internet off
+delete one image
+reload the app
+turn internet on
+check if images persist there state.  
+ check if image is deleted from the cloud
+turn internet off
 delete all images
+reload the app
+turn internet on
+check if images persist there state.
+check if images deleted from the cloud
 
-Pick image again at the time of uploading the image
-Pick multiple images again at the time of uploading the image
+Internet on
+at the time of uploading multiple images delete the already uploaded image
+At the time of uploading the image what will happen if user deletes the uploading image
