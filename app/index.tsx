@@ -28,11 +28,13 @@ const supabase = createClient(
 const STORAGE_BUCKET = configData.supabase.bucketName;
 const TOAST_DURATION = configData.toast?.duration || 1000; // Fallback to 1000ms if not defined
 
-// Add constants for AsyncStorage keys
+// Update storage keys to include all queues
 const STORAGE_KEYS = {
   SAVED_IMAGES: "savedImages",
   OFFLINE_DELETE_QUEUE: "offlineDeleteQueue",
   ONLINE_DELETE_QUEUE: "onlineDeleteQueue",
+  SAVE_QUEUE: "saveQueue",
+  UPLOAD_QUEUE: "uploadQueue",
 } as const;
 
 interface ImageInfo {
@@ -178,7 +180,7 @@ export default function App() {
       isConnected &&
       onlineDeleteQueue.length > 0
     ) {
-      console.log("📅 Scheduling online queue processing in 500ms...");
+      console.log("📅 Scheduling online delete queue processing in 500ms...");
       const timeout = setTimeout(() => {
         processOnlineDeleteQueue();
       }, 500);
@@ -198,12 +200,33 @@ export default function App() {
     console.log("🔄 Loading saved images and queues...");
     try {
       // Load all data in parallel
-      const [savedImagesData, offlineQueueData, onlineQueueData] =
-        await Promise.all([
-          AsyncStorage.getItem(STORAGE_KEYS.SAVED_IMAGES),
-          AsyncStorage.getItem(STORAGE_KEYS.OFFLINE_DELETE_QUEUE),
-          AsyncStorage.getItem(STORAGE_KEYS.ONLINE_DELETE_QUEUE),
-        ]);
+      const [
+        savedImagesData,
+        offlineQueueData,
+        onlineQueueData,
+        saveQueueData,
+        uploadQueueData,
+      ] = await Promise.all([
+        AsyncStorage.getItem(STORAGE_KEYS.SAVED_IMAGES),
+        AsyncStorage.getItem(STORAGE_KEYS.OFFLINE_DELETE_QUEUE),
+        AsyncStorage.getItem(STORAGE_KEYS.ONLINE_DELETE_QUEUE),
+        AsyncStorage.getItem(STORAGE_KEYS.SAVE_QUEUE),
+        AsyncStorage.getItem(STORAGE_KEYS.UPLOAD_QUEUE),
+      ]);
+
+      // Restore save queue
+      if (saveQueueData) {
+        const saveQueue = JSON.parse(saveQueueData);
+        console.log(`📥 Restored save queue: ${saveQueue.length} items`);
+        setSaveQueue(saveQueue);
+      }
+
+      // Restore upload queue
+      if (uploadQueueData) {
+        const uploadQueue = JSON.parse(uploadQueueData);
+        console.log(`📤 Restored upload queue: ${uploadQueue.length} items`);
+        setUploadQueue(uploadQueue);
+      }
 
       // Restore offline delete queue
       if (offlineQueueData) {
@@ -325,7 +348,7 @@ export default function App() {
 
       console.log(`✨ Step 1: ${result.assets.length} image(s) selected`);
 
-      // Add selected images to save queue
+      // Add selected images to save queue and persist
       const newImages: ImageInfo[] = result.assets.map((asset) => ({
         uri: asset.uri,
         uploadStatus: "pending",
@@ -333,8 +356,12 @@ export default function App() {
         uploadDate: null,
       }));
 
-      console.log("📥 Step 2: Moving images to save queue...");
-      setSaveQueue((prev) => [...prev, ...newImages]);
+      const newSaveQueue = [...saveQueue, ...newImages];
+      setSaveQueue(newSaveQueue);
+      await AsyncStorage.setItem(
+        STORAGE_KEYS.SAVE_QUEUE,
+        JSON.stringify(newSaveQueue)
+      );
     } catch (error) {
       console.error("❌ Error picking image:", error);
       Toast.show({
@@ -397,6 +424,13 @@ export default function App() {
       }
 
       setSaveQueue([]);
+      await AsyncStorage.setItem(STORAGE_KEYS.SAVE_QUEUE, JSON.stringify([]));
+      const newUploadQueue = [...uploadQueue, ...validImages];
+      setUploadQueue(newUploadQueue);
+      await AsyncStorage.setItem(
+        STORAGE_KEYS.UPLOAD_QUEUE,
+        JSON.stringify(newUploadQueue)
+      );
     } catch (error) {
       console.error(
         "❌ Error processing save queue:",
@@ -519,6 +553,7 @@ export default function App() {
     try {
       const currentQueue = [...uploadQueue];
       setUploadQueue([]); // Clear the queue immediately
+      await AsyncStorage.setItem(STORAGE_KEYS.UPLOAD_QUEUE, JSON.stringify([]));
 
       // Process images one at a time
       for (const image of currentQueue) {
