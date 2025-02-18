@@ -117,6 +117,8 @@ export default function App() {
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
   const [onlineQueueTimeout, setOnlineQueueTimeout] =
     useState<NodeJS.Timeout | null>(null);
+  const [uploadQueueTimeout, setUploadQueueTimeout] =
+    useState<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener((state) => {
@@ -126,15 +128,27 @@ export default function App() {
       setIsConnected(isConnected);
 
       if (isConnected) {
-        // When connection is restored, add error status images back to upload queue
+        // When connection is restored, check for failed uploads
         setSavedImages((prev) => {
           const failedUploads = prev.filter(
             (img) =>
-              img.uploadStatus === "error" || img.uploadStatus === "pending"
+              img.uploadStatus === "error" ||
+              img.uploadStatus === "pending" ||
+              (img.uploadStatus === "uploading" &&
+                !processingImages.has(generateImageHash(img.uri)))
           );
+
           if (failedUploads.length > 0) {
-            console.log(`🔄 Retrying ${failedUploads.length} failed uploads`);
-            setUploadQueue((prevQueue) => [...prevQueue, ...failedUploads]);
+            console.log(
+              `🔄 Retrying ${failedUploads.length} failed/interrupted uploads`
+            );
+            // Reset status to pending for retry
+            const retriableImages = failedUploads.map((img) => ({
+              ...img,
+              uploadStatus: "pending",
+              uploadError: null,
+            }));
+            setUploadQueue((prevQueue) => [...prevQueue, ...retriableImages]);
           }
           return prev;
         });
@@ -153,10 +167,28 @@ export default function App() {
   }, [saveQueue.length]);
 
   useEffect(() => {
-    if (isConnected && uploadQueue.length > 0) {
-      processUploadQueue();
+    // Clear any existing timeout when dependencies change
+    if (uploadQueueTimeout) {
+      clearTimeout(uploadQueueTimeout);
     }
-  }, [uploadQueue.length, isConnected]);
+
+    // Only schedule upload processing if save queue is empty and we're connected
+    if (saveQueue.length === 0 && isConnected && uploadQueue.length > 0) {
+      console.log("📅 Scheduling upload queue processing in 500ms...");
+      const timeout = setTimeout(() => {
+        processUploadQueue();
+      }, 500);
+
+      setUploadQueueTimeout(timeout);
+    }
+
+    // Cleanup timeout on unmount or when dependencies change
+    return () => {
+      if (uploadQueueTimeout) {
+        clearTimeout(uploadQueueTimeout);
+      }
+    };
+  }, [isConnected, uploadQueue.length, saveQueue.length]);
 
   useEffect(() => {
     loadSavedImages();
@@ -532,9 +564,11 @@ export default function App() {
           ? (error as { message: string }).message
           : "Upload failed";
 
-      // Set status back to pending for network errors
+      // Set status to pending for network errors to allow retry
       const isNetworkError =
-        errorMessage.toLowerCase().includes("network") || !isConnected;
+        errorMessage.toLowerCase().includes("network") ||
+        !isConnected ||
+        errorMessage.toLowerCase().includes("failed to fetch");
 
       return {
         ...imageInfo,
