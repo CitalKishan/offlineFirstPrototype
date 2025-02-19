@@ -63,7 +63,7 @@ check if all uploaded
 delete one image
 check if deleted
 delete all images
-check if deleted
+check if all deleted
 upload multiple images and delete the last image before its been uploaded
 check number of images uploaded to cloud
 delete all images quickly
@@ -75,14 +75,14 @@ check if all images deleted from cloud
 
 Persistent storage
 upload image
+check is image is uploaded to cloud
 force stop the app
 reopen the app
 check the number of uploaded images
 Check the number of images showing in the device
 delete image
-upload multiple images
-force stop the app
-reopen the app
+check is image is deleted form the cloud
+upload multiple images at the time of upload reload the app
 check if uploaded images are still there
 delete all images quickly and quickly reload the app
 check if all images are deleted from cloud
@@ -116,13 +116,23 @@ turn internet off
 delete all images
 turn internet on
 check if all images are deleted from cloud
+upload multiple images and at the time of uploading turn internet off
+turn internet on
+check how many pics uploaded to cloud
+delete all pics
 
 Persistent storage
+upload multiple images and at the time of uploading turn internet off
+reload app
+turn internet on
+check how many pics uploaded to cloud
+delete all pics
 turn internet off
 upload an image
 reload the app
-check if image is showing in the app
 turn internet on
+open app
+check if image is showing in the app
 check if image uploaded to the cloud
 turn internet off
 deleted image
