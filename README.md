@@ -147,3 +147,6 @@ reload the app
 turn internet on
 check if images persist there state.
 check if images deleted from the cloud
+
+cloud db link:-
+https://supabase.com/dashboard/project/qaxynrlmloqlqypcmcai/storage/buckets/images
